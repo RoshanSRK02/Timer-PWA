@@ -10,6 +10,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setUser,
     } = useAuthStore.getState();
 
+    console.log("SUPABASE URL:", import.meta.env.VITE_SUPABASE_URL);
+    console.log(
+      "SUPABASE KEY EXISTS:",
+      Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY),
+    );
+
     if (!isSupabaseConfigured()) {
       setUser(null);
       setInitializationError(

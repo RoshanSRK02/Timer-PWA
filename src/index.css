@@ -77,6 +77,7 @@ a {
 
 .flip-digit {
   position: relative;
+  overflow: hidden;
   width: clamp(2.5rem, 9vw, 4.25rem);
   height: clamp(3.5rem, 12vw, 5.25rem);
   perspective: 700px;
