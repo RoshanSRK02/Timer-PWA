@@ -43,7 +43,7 @@ dismiss the recommendation for the current tab.
 To test the production service worker locally, run `npm run build` followed by
 `npm run preview`; the development server does not register the worker.
 
-## Configure Web Push
+## Configure Web Push s
 
 Push delivery requires VAPID keys and the Supabase Edge Function; browser
 notifications alone do not provide server-to-device delivery.
