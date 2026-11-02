@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --background: 220 20% 97%;
+  --foreground: 224 31% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 31% 15%;
+  --primary: 253 77% 63%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 20% 95%;
+  --secondary-foreground: 224 24% 24%;
+  --muted: 220 17% 94%;
+  --muted-foreground: 220 10% 48%;
+  --accent: 253 77% 96%;
+  --accent-foreground: 253 65% 48%;
+  --border: 220 16% 90%;
+  --input: 220 16% 90%;
+  --ring: 253 77% 63%;
+  --radius: 1rem;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: 225 24% 10%;
+  --foreground: 220 20% 94%;
+  --card: 224 22% 13%;
+  --card-foreground: 220 20% 94%;
+  --primary: 253 82% 72%;
+  --primary-foreground: 226 27% 11%;
+  --secondary: 224 19% 18%;
+  --secondary-foreground: 220 20% 94%;
+  --muted: 224 19% 18%;
+  --muted-foreground: 220 12% 65%;
+  --accent: 253 30% 20%;
+  --accent-foreground: 253 82% 78%;
+  --border: 224 17% 23%;
+  --input: 224 17% 23%;
+  --ring: 253 82% 72%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.18);
+}
