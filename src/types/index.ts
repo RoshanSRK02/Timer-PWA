@@ -1,9 +1,75 @@
 export type ThemePreference = "light" | "dark" | "system";
-export type TimerStatus = "idle" | "running" | "paused";
+export type TimerStatus =
+  | "idle"
+  | "running"
+  | "paused"
+  | "awaiting-completion";
+
+export interface TimerSnapshot {
+  userId: string;
+  status: TimerStatus;
+  taskSheetId: string | null;
+  taskId: string | null;
+  durationSeconds: number;
+  accumulatedSeconds: number;
+  startedAt: string | null;
+  sessionId: string | null;
+  sessionStartedAt: string | null;
+  breakSession: boolean;
+  breakLabel: string | null;
+  updatedAt: string;
+  completedSessions: number;
+  completionConfirmed: boolean;
+  lastSession: TimerSessionRecord | null;
+}
+
+export interface TimerSessionRecord {
+  id: string;
+  userId: string;
+  taskSheetId: string | null;
+  taskId: string | null;
+  durationSeconds: number;
+  actualSeconds: number;
+  startedAt: string;
+  endedAt: string;
+  breakSession: boolean;
+  breakLabel: string | null;
+  notes: string;
+  outcome: "stopped" | "completed" | "incomplete";
+}
 
 export interface FocusSession {
   id: string;
   label: string;
   durationMinutes: number;
   completedAt: string;
+}
+
+export type TaskStatus =
+  | "Pending"
+  | "InProgress"
+  | "Paused"
+  | "Completed"
+  | "Skipped"
+  | "Archived";
+
+export type TaskCompletionMethod = "manual" | "timer";
+
+export interface Task {
+  id: string;
+  title: string;
+  estimatedMinutes: number;
+  actualMinutes: number;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  completionMethod?: TaskCompletionMethod | null;
+}
+
+export interface TaskSheet {
+  id: string;
+  name: string;
+  tasks: Task[];
+  createdAt: string;
 }

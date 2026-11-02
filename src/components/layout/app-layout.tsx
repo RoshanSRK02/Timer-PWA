@@ -1,22 +1,51 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { Clock3, LayoutDashboard, Settings2, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import {
+  BarChart3,
+  Clock3,
+  History,
+  LogOut,
+  Settings2,
+  Sparkles,
+  ListTodo,
+  Timer,
+} from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/utils/cn";
+import { Button } from "@/components/ui/button";
+import { OrientationRecommendation } from "@/components/layout/orientation-recommendation";
 
 const navItems = [
-  { to: "/", label: "Focus", icon: LayoutDashboard, end: true },
+  { to: "/tasks", label: "Tasks", icon: ListTodo, end: false },
+  { to: "/", label: "Timer", icon: Timer, end: true },
+  { to: "/analytics", label: "Statistics", icon: BarChart3, end: false },
   { to: "/settings", label: "Settings", icon: Settings2, end: false },
 ];
 
 export function AppLayout() {
+  const { user, signOut } = useAuth();
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  async function handleSignOut() {
+    setSignOutError(null);
+    try {
+      await signOut();
+    } catch (error) {
+      setSignOutError(
+        error instanceof Error ? error.message : "Unable to sign out.",
+      );
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <aside className="hidden border-r bg-card/70 px-5 py-7 lg:flex lg:flex-col">
-        <a href="/" className="mb-12 flex items-center gap-3 px-2">
+        <Link to="/" className="mb-12 flex items-center gap-3 px-2">
           <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Clock3 className="size-5" />
           </span>
           <span className="text-xl font-bold tracking-tight">tempo</span>
-        </a>
+        </Link>
         <p className="mb-3 px-3 text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
           Workspace
         </p>
@@ -39,6 +68,20 @@ export function AppLayout() {
               {label}
             </NavLink>
           ))}
+          <NavLink
+            to="/history"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+              )
+            }
+          >
+            <History className="size-[18px]" />
+            Session history
+          </NavLink>
         </nav>
         <div className="mt-auto rounded-2xl bg-accent p-4">
           <Sparkles className="mb-3 size-5 text-primary" />
@@ -51,18 +94,34 @@ export function AppLayout() {
 
       <div className="flex min-h-screen min-w-0 flex-col">
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/85 px-5 backdrop-blur-md sm:px-8 lg:px-10">
-          <a href="/" className="flex items-center gap-2 font-bold lg:hidden">
+          <Link to="/" className="flex items-center gap-2 font-bold lg:hidden">
             <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Clock3 className="size-4" />
             </span>
             tempo
-          </a>
+          </Link>
           <div className="hidden text-sm text-muted-foreground lg:block">
             Your space to do great work.
           </div>
-          <div className="ml-auto flex items-center gap-2 text-xs font-medium text-muted-foreground">
-            <span className="size-2 rounded-full bg-emerald-500" />
-            Ready when you are
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            {signOutError && (
+              <span className="max-w-40 truncate text-xs text-destructive" role="alert">
+                {signOutError}
+              </span>
+            )}
+            <span className="hidden max-w-48 truncate text-xs text-muted-foreground sm:block">
+              {user?.email}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => void handleSignOut()}
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut className="size-4" />
+            </Button>
           </div>
         </header>
 
@@ -70,7 +129,7 @@ export function AppLayout() {
           <Outlet />
         </main>
 
-        <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-2 border-t bg-card/95 p-2 backdrop-blur lg:hidden">
+        <nav className="mobile-tab-bar fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t bg-card/95 p-2 backdrop-blur lg:hidden">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -89,6 +148,7 @@ export function AppLayout() {
           ))}
         </nav>
       </div>
+      <OrientationRecommendation />
     </div>
   );
 }

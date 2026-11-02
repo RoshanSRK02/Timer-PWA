@@ -2,6 +2,8 @@ import { motion } from "framer-motion";
 import { Check, Database, MoonStar, Settings2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { TimerSettings } from "@/features/dashboard/timer-settings";
+import { PushNotificationSettings } from "@/features/settings/push-notification-settings";
 import { isSupabaseConfigured } from "@/services/supabase";
 
 export function SettingsPage() {
@@ -25,6 +27,23 @@ export function SettingsPage() {
           Make your workspace feel like yours.
         </p>
       </div>
+
+      <Card className="p-5 sm:p-7">
+        <div className="mb-6 flex items-start gap-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
+            <MoonStar className="size-5" />
+          </span>
+          <div>
+            <h2 className="font-semibold">Timer sound</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Choose a session alarm and set its volume.
+            </p>
+          </div>
+        </div>
+        <TimerSettings />
+      </Card>
+
+      <PushNotificationSettings />
 
       <Card className="p-5 sm:p-7">
         <div className="mb-6 flex items-start gap-4">
