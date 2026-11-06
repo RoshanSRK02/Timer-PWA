@@ -200,6 +200,7 @@ export function PopOutTimerButton() {
   const timerStatus = useTimerStore((state) => state.status);
   const taskId = useTimerStore((state) => state.taskId);
   const taskSheetId = useTimerStore((state) => state.taskSheetId);
+  const [isMobileBrowser, setIsMobileBrowser] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
@@ -208,6 +209,14 @@ export function PopOutTimerButton() {
     timerStatus === "running" ||
     timerStatus === "paused" ||
     timerStatus === "overtime";
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia("(pointer: coarse) and (hover: none)");
+    const updateMobileState = () => setIsMobileBrowser(mobileQuery.matches);
+    updateMobileState();
+    mobileQuery.addEventListener("change", updateMobileState);
+    return () => mobileQuery.removeEventListener("change", updateMobileState);
+  }, []);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -330,10 +339,10 @@ export function PopOutTimerButton() {
     setError("The browser blocked the pop-out timer window.");
   }
 
-  if (!taskId || !taskSheetId || !activeTimer) return null;
+  if (isMobileBrowser || !taskId || !taskSheetId || !activeTimer) return null;
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="pop-out-timer-control flex flex-col items-end gap-1">
       <Button
         type="button"
         variant="outline"

@@ -96,7 +96,9 @@ export function DashboardPage() {
   const [timerStageError, setTimerStageError] = useState<string | null>(null);
   const [wakeLockError, setWakeLockError] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
+  const [isMobileLandscape, setIsMobileLandscape] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const isCompactMobileFocus = focusMode && isMobileLandscape;
   const timerStageRef = useRef<HTMLDivElement>(null);
   const lastSessionIdRef = useRef(timer.lastSession?.id ?? null);
   const lastAutoPlaySessionIdRef = useRef(timer.lastSession?.id ?? null);
@@ -117,6 +119,16 @@ export function DashboardPage() {
   const nextTaskCountdown = nextTaskPrompt
     ? Math.max(0, Math.ceil((nextTaskPrompt.deadline - clockNow) / 1000))
     : 0;
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(
+      "(max-width: 1023px) and (max-height: 600px) and (orientation: landscape) and (pointer: coarse)",
+    );
+    const updateMobileLandscape = () => setIsMobileLandscape(mediaQuery.matches);
+    updateMobileLandscape();
+    mediaQuery.addEventListener("change", updateMobileLandscape);
+    return () => mediaQuery.removeEventListener("change", updateMobileLandscape);
+  }, []);
 
   const toggleFocusMode = useCallback(async () => {
     setTimerStageError(null);
@@ -506,7 +518,7 @@ export function DashboardPage() {
         tabIndex={-1}
         className={`timer-stage ${
           isFullscreen ? "timer-fullscreen" : ""
-        } ${status === "overtime" ? "timer-overtime" : ""} oled-pixel-shift relative space-y-4`}
+        } ${isCompactMobileFocus ? "mobile-compact-focus" : ""} ${status === "overtime" ? "timer-overtime" : ""} oled-pixel-shift relative space-y-4`}
       >
         <div className="flex flex-wrap items-center justify-end gap-2">
           <PopOutTimerButton />
@@ -540,7 +552,9 @@ export function DashboardPage() {
           transition={{ duration: 0.4, delay: 0.08 }}
         >
           <Card className="timer-card relative flex min-h-[480px] flex-col items-center justify-center overflow-hidden px-5 py-10 sm:min-h-[520px]">
-            <div className="oled-hidden pointer-events-none absolute -right-24 -top-32 size-80 rounded-full bg-primary/[0.05] blur-3xl" />
+            {!isCompactMobileFocus && (
+              <div className="oled-hidden pointer-events-none absolute -right-24 -top-32 size-80 rounded-full bg-primary/[0.05] blur-3xl" />
+            )}
             <div className={`timer-preset-tabs focus-hidden relative mb-8 flex items-center gap-1 rounded-xl bg-secondary p-1 ${timer.breakSession ? "hidden" : ""}`}>
               {presets.map(({ label, minutes, icon: Icon }) => (
                 <button
@@ -562,6 +576,7 @@ export function DashboardPage() {
               ))}
             </div>
 
+            {!isCompactMobileFocus && (
             <div className="timer-visualization relative flex size-64 items-center justify-center sm:size-[290px]">
               <svg
                 className="absolute inset-0 size-full -rotate-90"
@@ -610,6 +625,7 @@ export function DashboardPage() {
                 </p>
               </div>
             </div>
+            )}
 
             <FlipClock
               totalSeconds={
@@ -624,11 +640,11 @@ export function DashboardPage() {
               overtime={status === "overtime"}
             />
             {status === "overtime" && (
-              <p className="relative mt-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold tracking-[0.16em] text-amber-600 dark:text-amber-400">
+              <p className="timer-overtime-label relative mt-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold tracking-[0.16em] text-amber-600 dark:text-amber-400">
                 OVERTIME
               </p>
             )}
-            <p className="relative mt-3 max-w-[80%] truncate text-center text-sm text-muted-foreground">
+            <p className="timer-task-name relative mt-3 max-w-[80%] truncate text-center text-sm text-muted-foreground">
               {activeTask?.title ??
                 (timer.breakSession
                   ? "Let your mind reset"
@@ -636,7 +652,6 @@ export function DashboardPage() {
                     ? "Stay with this moment"
                     : "A little progress goes a long way")}
             </p>
-
             {timer.breakSession && timer.breakComplete && (
               <div
                 className="relative mt-4 flex flex-wrap items-center justify-center gap-2 rounded-xl border border-primary/30 bg-accent/40 p-3"

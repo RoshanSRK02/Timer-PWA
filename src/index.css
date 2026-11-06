@@ -497,3 +497,187 @@ body.focus-mode main {
     gap: 0.1rem;
   }
 }
+
+@media (max-width: 1023px) and (max-height: 600px) and (orientation: landscape) and (pointer: coarse) {
+  body.focus-mode {
+    overflow: hidden;
+  }
+
+  body.focus-mode main {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    overflow: hidden;
+    padding: 0 !important;
+  }
+
+  body.focus-mode .focus-workspace-layout {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+    margin: 0;
+    padding:
+      max(0.35rem, env(safe-area-inset-top, 0px))
+      max(0.5rem, env(safe-area-inset-right, 0px))
+      max(0.35rem, env(safe-area-inset-bottom, 0px))
+      max(0.5rem, env(safe-area-inset-left, 0px));
+    border: 0;
+    border-radius: 0;
+    background: hsl(var(--background));
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus > .flex:first-child {
+    min-height: 2rem;
+    flex: 0 0 2rem;
+    justify-content: flex-end;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus > p,
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-preset-tabs,
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-visualization,
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls > label {
+    display: none !important;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-grid,
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-grid > :first-child,
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-grid > :first-child > div {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-grid {
+    flex: 1;
+    overflow: hidden;
+    gap: 0.25rem;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-card {
+    display: flex;
+    height: 100%;
+    min-height: 0 !important;
+    flex-direction: column;
+    justify-content: space-evenly;
+    gap: clamp(0.15rem, 0.8vh, 0.4rem);
+    overflow: hidden;
+    padding: 0.25rem 0.5rem !important;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-task-name {
+    order: 1;
+    max-width: 94%;
+    margin-top: 0;
+    color: hsl(var(--foreground));
+    font-size: clamp(0.95rem, 3.2vh, 1.3rem);
+    font-weight: 650;
+    line-height: 1.2;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-card > [role="timer"] {
+    order: 2;
+    gap: clamp(0.25rem, 1.2vw, 0.75rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus [role="timer"] .flex-col {
+    gap: 0.15rem;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus [role="timer"] .flex-col > div {
+    gap: clamp(0.15rem, 0.7vw, 0.45rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus [role="timer"] .flip-digit {
+    width: clamp(2.6rem, 9vw, 5rem);
+    height: clamp(2.8rem, 18vh, 5.2rem);
+    border-radius: 0.5rem;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus [role="timer"] .flip-digit__value {
+    font-size: clamp(1.8rem, 11vh, 4rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus [role="timer"] .flex-col > span {
+    font-size: clamp(0.45rem, 1.5vh, 0.65rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-overtime-label {
+    order: 3;
+    margin: 0;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-primary-controls {
+    order: 4;
+    min-height: 2.5rem;
+    margin: 0;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-extension-controls {
+    order: 5;
+    flex-wrap: nowrap;
+    gap: clamp(0.25rem, 1vw, 0.6rem);
+    margin: 0;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-extension-controls button {
+    min-height: 2.4rem;
+    padding-inline: clamp(0.45rem, 1.5vw, 0.85rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls {
+    order: 6;
+    display: grid;
+    width: 100%;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(0.35rem, 1vw, 0.75rem);
+    margin: 0;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls > button {
+    min-height: 2.4rem;
+    white-space: nowrap;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls > div {
+    min-width: 0;
+    gap: clamp(0.25rem, 0.8vw, 0.6rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls > div > div {
+    width: 100%;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: clamp(0.25rem, 0.8vw, 0.6rem);
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls > div > div > div:first-child {
+    min-width: 0;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls select,
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls input[type="range"] {
+    height: 2.4rem;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .timer-secondary-controls > div > button {
+    flex: 0 0 auto;
+  }
+
+  body.focus-mode .timer-stage.mobile-compact-focus .pop-out-timer-control {
+    display: none !important;
+  }
+}
