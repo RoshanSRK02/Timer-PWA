@@ -159,6 +159,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       sessionStartedAt: null,
       breakSession: false,
       breakLabel: null,
+      lastSession: null,
       updatedAt: nowIso(),
     });
   },

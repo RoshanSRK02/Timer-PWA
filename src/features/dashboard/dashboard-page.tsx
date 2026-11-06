@@ -26,6 +26,7 @@ import { FlipClock } from "@/features/dashboard/flip-clock";
 import { TimerSettings } from "@/features/dashboard/timer-settings";
 import { useTimerPersistence } from "@/hooks/use-timer-persistence";
 import { TaskManager } from "@/features/tasks/task-manager";
+import { PopOutTimerButton } from "@/features/dashboard/pop-out-timer";
 import { useTaskStore } from "@/stores/use-task-store";
 import { useTimerPreferencesStore } from "@/stores/use-timer-preferences-store";
 import { playAlarmSound } from "@/services/alarm-sounds";
@@ -492,7 +493,8 @@ export function DashboardPage() {
           isFullscreen ? "timer-fullscreen" : ""
         } ${status === "overtime" ? "timer-overtime" : ""} oled-pixel-shift relative space-y-4`}
       >
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <PopOutTimerButton />
           <Button
             type="button"
             variant="outline"
@@ -631,7 +633,13 @@ export function DashboardPage() {
             </div>
 
             <FlipClock
-              totalSeconds={status === "overtime" ? overtimeSeconds : remainingSeconds}
+              totalSeconds={
+                status === "overtime"
+                  ? overtimeSeconds
+                  : status === "idle" && timer.lastSession?.outcome === "completed"
+                    ? 0
+                    : remainingSeconds
+              }
               overtime={status === "overtime"}
             />
             {status === "overtime" && (

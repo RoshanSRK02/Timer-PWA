@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   BarChart3,
   Clock3,
   History,
   ListTodo,
   LogOut,
-  Pause,
-  Play,
   Settings2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,11 +13,7 @@ import { cn } from "@/utils/cn";
 import { Button } from "@/components/ui/button";
 import { OrientationRecommendation } from "@/components/layout/orientation-recommendation";
 import { useTaskStore } from "@/stores/use-task-store";
-import {
-  getTimerOvertimeSeconds,
-  getTimerRemainingSeconds,
-  useTimerStore,
-} from "@/stores/use-timer-store";
+import { useTimerStore } from "@/stores/use-timer-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { KeyboardShortcutsDialog } from "@/features/settings/keyboard-shortcuts";
 
@@ -29,117 +23,6 @@ const navItems = [
   { to: "/history", label: "History", icon: History },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
-
-function DynamicIsland({ visible }: { visible: boolean }) {
-  const navigate = useNavigate();
-  const [expanded, setExpanded] = useState(false);
-  const [now, setNow] = useState(Date.now());
-  const timer = useTimerStore();
-  const sheets = useTaskStore((state) => state.sheets);
-  const task = sheets
-    .find((sheet) => sheet.id === timer.taskSheetId)
-    ?.tasks.find((item) => item.id === timer.taskId);
-  const shown = timer.status !== "idle";
-
-  useEffect(() => {
-    if (
-      timer.status !== "running" &&
-      !(timer.status === "overtime" && timer.startedAt)
-    ) return;
-    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, [timer.status, timer.startedAt]);
-
-  if (!shown || !visible) return null;
-
-  const remaining = getTimerRemainingSeconds(timer, now);
-  const overtimeSeconds = getTimerOvertimeSeconds(timer, now);
-  const label =
-    timer.status === "overtime"
-      ? `+${String(Math.floor(overtimeSeconds / 60)).padStart(2, "0")}:${String(overtimeSeconds % 60).padStart(2, "0")}`
-      : `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
-
-  function openTimer() {
-    navigate("/");
-    window.setTimeout(() => {
-      document.getElementById("timer-stage")?.focus({ preventScroll: true });
-      document.getElementById("timer-stage")?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
-  }
-
-  return (
-    <div
-      className="dynamic-island fixed left-1/2 top-3 z-40 -translate-x-1/2"
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
-    >
-      <div
-        className={`overflow-hidden rounded-full border border-white/10 bg-neutral-950 text-white shadow-2xl transition-all duration-300 ${
-          expanded ? "w-[min(26rem,calc(100vw-2rem))] rounded-3xl" : "w-36"
-        }`}
-      >
-        {expanded ? (
-          <div className="p-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300">
-              Current Task
-            </p>
-            <p className="mt-1 truncate text-sm font-semibold">
-              {task?.title ?? (timer.breakSession ? timer.breakLabel : "Focus session")}
-            </p>
-            <p className="my-3 text-center font-mono text-3xl tabular-nums">
-              {label}
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {timer.status === "running" ||
-              (timer.status === "overtime" && timer.startedAt) ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="border-white/20 bg-white/10 text-white hover:bg-white/20"
-                  onClick={() => useTimerStore.getState().pause()}
-                >
-                  <Pause className="size-3.5" /> Pause
-                </Button>
-              ) : timer.status === "paused" || timer.status === "overtime" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="border-white/20 bg-white/10 text-white hover:bg-white/20"
-                  onClick={() => useTimerStore.getState().resume()}
-                >
-                  <Play className="size-3.5" /> Resume
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="border-white/20 bg-white/10 text-white hover:bg-white/20"
-                onClick={() => useTimerStore.getState().finishEarly()}
-              >
-                Finish
-              </Button>
-              <Button type="button" size="sm" onClick={openTimer}>
-                Open Timer
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="w-full px-4 py-2 text-center font-mono text-sm font-semibold tabular-nums"
-            onClick={openTimer}
-            aria-label={`Open timer, ${label}`}
-          >
-            {label}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export function AppLayout() {
   const { user, signOut } = useAuth();
@@ -215,7 +98,7 @@ export function AppLayout() {
   const version = import.meta.env.VITE_APP_VERSION ?? "v1.0.0";
 
   return (
-    <div className="relative min-h-screen bg-background lg:grid lg:grid-cols-[72px_minmax(0,1fr)]">
+    <div className="app-shell relative min-h-[100dvh] bg-background lg:grid lg:grid-cols-[72px_minmax(0,1fr)]">
       <aside
         onMouseEnter={() => setSidebarExpanded(true)}
         onMouseLeave={() => setSidebarExpanded(false)}
@@ -294,7 +177,7 @@ export function AppLayout() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 pb-24 sm:px-8 lg:px-10 lg:py-10 lg:pb-10">
+        <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-8 pb-24 sm:px-8 lg:px-8 lg:py-10 lg:pb-10">
           <Outlet />
         </main>
         <footer className="px-5 pb-20 text-right text-xs text-muted-foreground sm:px-8 lg:px-10 lg:pb-4">
@@ -324,7 +207,6 @@ export function AppLayout() {
           ))}
         </nav>
       </div>
-      <DynamicIsland visible={!sidebarExpanded} />
       {shortcutsOpen && (
         <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} />
       )}

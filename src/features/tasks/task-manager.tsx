@@ -348,7 +348,10 @@ export function TaskManager() {
   }
 
   return (
-    <section aria-labelledby="task-manager-title" className="space-y-4">
+    <section
+      aria-labelledby="task-manager-title"
+      className="task-manager-panel min-w-0 space-y-4"
+    >
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="mb-1 flex items-center gap-2 text-sm font-medium text-primary">
@@ -387,7 +390,7 @@ export function TaskManager() {
       )}
 
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex flex-col gap-3 border-b p-4 sm:px-5">
           <div className="flex min-w-0 items-center gap-2">
             <label htmlFor="active-sheet" className="sr-only">
               Active task sheet
@@ -396,7 +399,7 @@ export function TaskManager() {
               id="active-sheet"
               value={activeSheet?.id ?? ""}
               onChange={(event) => setActiveSheet(event.target.value)}
-              className="h-10 min-w-0 max-w-[220px] rounded-xl border border-input bg-background px-3 text-sm font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-10 w-full min-w-0 max-w-[220px] flex-1 rounded-xl border border-input bg-background px-3 text-sm font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {sheets.map((sheet) => (
                 <option key={sheet.id} value={sheet.id}>
@@ -440,7 +443,7 @@ export function TaskManager() {
               <Trash2 className="size-4" />
             </Button>
           </div>
-          <div className="relative w-full sm:max-w-xs">
+          <div className="relative w-full">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"

@@ -8,13 +8,25 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     const root = document.documentElement;
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const applyTheme = () => {
+      const isSystemDark = theme === "system" && mediaQuery.matches;
       const isDark =
         theme === "dark" ||
         theme === "oled" ||
-        (theme === "system" && mediaQuery.matches);
+        isSystemDark;
       root.classList.toggle("dark", isDark);
       root.classList.toggle("oled", theme === "oled");
       root.style.colorScheme = isDark ? "dark" : "light";
+      const themeColor = document.querySelector<HTMLMetaElement>(
+        'meta[name="theme-color"]',
+      );
+      if (themeColor) {
+        themeColor.content =
+          theme === "oled"
+            ? "#000000"
+            : isDark
+              ? "#131620"
+              : "#f7f8fa";
+      }
     };
 
     applyTheme();
