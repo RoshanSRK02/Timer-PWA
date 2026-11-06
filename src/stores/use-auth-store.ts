@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type { User } from "@supabase/supabase-js";
 
+export const GUEST_USER_ID = "guest-local";
+
 interface AuthState {
   user: User | null;
   isLoading: boolean;

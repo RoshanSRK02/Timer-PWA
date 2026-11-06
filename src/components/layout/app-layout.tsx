@@ -6,6 +6,7 @@ import {
   History,
   ListTodo,
   LogOut,
+  RefreshCw,
   Settings2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -29,6 +30,8 @@ export function AppLayout() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [updateRegistration, setUpdateRegistration] =
+    useState<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
     function handleShortcuts(event: KeyboardEvent) {
@@ -43,7 +46,8 @@ export function AppLayout() {
 
       if (event.key === " ") {
         event.preventDefault();
-        if (timer.status === "running" || (timer.status === "overtime" && timer.startedAt)) timer.pause();
+        if (timer.breakSession && timer.breakComplete) timer.resumeFocusSession();
+        else if (timer.status === "running" || (timer.status === "overtime" && timer.startedAt)) timer.pause();
         else if (timer.status === "paused" || timer.status === "overtime") timer.resume();
       } else if (key === "enter") {
         const state = useTaskStore.getState();
@@ -66,8 +70,6 @@ export function AppLayout() {
         useThemeStore.getState().setTheme(
           useThemeStore.getState().theme === "oled" ? "dark" : "oled",
         );
-      } else if (key === "t") {
-        window.dispatchEvent(new CustomEvent("tempo:toggle-drawer"));
       } else if (key === "?" || (key === "/" && event.shiftKey)) {
         event.preventDefault();
         if (document.fullscreenElement) {
@@ -84,6 +86,43 @@ export function AppLayout() {
     return () => window.removeEventListener("keydown", handleShortcuts);
   }, []);
 
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    let active = true;
+    let registration: ServiceWorkerRegistration | null = null;
+
+    const checkForWaitingWorker = () => {
+      if (active && registration?.waiting && navigator.serviceWorker.controller) {
+        setUpdateRegistration(registration);
+      }
+    };
+    const handleUpdateFound = () => {
+      const installing = registration?.installing;
+      installing?.addEventListener("statechange", checkForWaitingWorker);
+      if (installing?.state === "installed") checkForWaitingWorker();
+    };
+
+    void navigator.serviceWorker
+      .ready
+      .then((serviceWorkerRegistration) => {
+        if (!active || !serviceWorkerRegistration) return;
+        registration = serviceWorkerRegistration;
+        registration.addEventListener("updatefound", handleUpdateFound);
+        checkForWaitingWorker();
+        return registration.update().catch((error: unknown) => {
+          console.warn("Tempo could not check for an app update.", error);
+        });
+      })
+      .catch((error: unknown) => {
+        console.warn("Tempo could not inspect the app service worker.", error);
+      });
+
+    return () => {
+      active = false;
+      registration?.removeEventListener("updatefound", handleUpdateFound);
+    };
+  }, []);
+
   async function handleSignOut() {
     setSignOutError(null);
     try {
@@ -95,10 +134,36 @@ export function AppLayout() {
     }
   }
 
-  const version = import.meta.env.VITE_APP_VERSION ?? "v1.0.0";
+  const version = import.meta.env.VITE_APP_VERSION || "v?.?.?";
+  function applyUpdate() {
+    const waiting = updateRegistration?.waiting;
+    if (!waiting) {
+      setUpdateRegistration(null);
+      return;
+    }
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      () => window.location.reload(),
+      { once: true },
+    );
+    waiting.postMessage({ type: "TEMPO_SKIP_WAITING" });
+  }
 
   return (
     <div className="app-shell relative min-h-[100dvh] bg-background lg:grid lg:grid-cols-[72px_minmax(0,1fr)]">
+      {updateRegistration && (
+        <div
+          className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[70] flex -translate-x-1/2 items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-xl"
+          role="status"
+        >
+          <span className="whitespace-nowrap text-sm font-medium">
+            A new version is available
+          </span>
+          <Button type="button" size="sm" onClick={applyUpdate}>
+            <RefreshCw className="size-4" /> Update Now
+          </Button>
+        </div>
+      )}
       <aside
         onMouseEnter={() => setSidebarExpanded(true)}
         onMouseLeave={() => setSidebarExpanded(false)}
@@ -164,20 +229,39 @@ export function AppLayout() {
             <span className="hidden max-w-48 truncate text-xs text-muted-foreground sm:block">
               {user?.email}
             </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => void handleSignOut()}
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOut className="size-4" />
-            </Button>
+            {user ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => void handleSignOut()}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut className="size-4" />
+              </Button>
+            ) : (
+              <Link
+                to="/login"
+                className="whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium text-primary hover:bg-accent"
+              >
+                Sign in to sync
+              </Link>
+            )}
           </div>
         </header>
 
         <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-8 pb-24 sm:px-8 lg:px-8 lg:py-10 lg:pb-10">
+          {!user && (
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm">
+              <span className="text-muted-foreground">
+                Sign in to sync your progress across devices.
+              </span>
+              <Link to="/login" className="font-medium text-primary hover:underline">
+                Continue with Google or Email / Password
+              </Link>
+            </div>
+          )}
           <Outlet />
         </main>
         <footer className="px-5 pb-20 text-right text-xs text-muted-foreground sm:px-8 lg:px-10 lg:pb-4">

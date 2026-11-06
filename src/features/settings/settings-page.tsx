@@ -1,14 +1,66 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { Check, Database, Keyboard, MoonStar, Settings2 } from "lucide-react";
+import {
+  Check,
+  Cloud,
+  Database,
+  Keyboard,
+  MoonStar,
+  Settings2,
+  UserRound,
+} from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { TimerSettings } from "@/features/dashboard/timer-settings";
 import { PushNotificationSettings } from "@/features/settings/push-notification-settings";
-import { isSupabaseConfigured } from "@/services/supabase";
+import { getSupabaseClient, isSupabaseConfigured } from "@/services/supabase";
+import { useAuth } from "@/hooks/use-auth";
+import { getLastSyncTime, onSyncStatusChange } from "@/services/sync-status";
+import { useAuthStore } from "@/stores/use-auth-store";
+import { migrateGuestData } from "@/services/guest-migration";
 
 export function SettingsPage() {
   const supabaseConfigured = isSupabaseConfigured();
+  const { signInWithOAuth, initializationError } = useAuth();
+  const user = useAuthStore((state) => state.user);
+  const [lastSync, setLastSync] = useState(getLastSyncTime);
+  const [accountError, setAccountError] = useState<string | null>(null);
+
+  useEffect(() => onSyncStatusChange(() => setLastSync(getLastSyncTime())), []);
+
+  async function continueWithGoogle() {
+    setAccountError(null);
+    try {
+      await signInWithOAuth("google");
+    } catch (error) {
+      setAccountError(
+        error instanceof Error ? error.message : "Unable to start Google sign-in.",
+      );
+    }
+  }
+
+  async function retryDataMigration() {
+    setAccountError(null);
+    const { setIsLoading, setUser, setInitializationError } =
+      useAuthStore.getState();
+    setIsLoading(true);
+    try {
+      const { data, error } = await getSupabaseClient().auth.getUser();
+      if (error) throw error;
+      if (!data.user) throw new Error("No signed-in account was found.");
+      await migrateGuestData(data.user.id);
+      setUser(data.user);
+      setInitializationError(null);
+    } catch (error) {
+      setAccountError(
+        error instanceof Error ? error.message : "Guest data migration failed.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   return (
     <motion.div
@@ -28,6 +80,76 @@ export function SettingsPage() {
           Make your workspace feel like yours.
         </p>
       </div>
+
+      <Card className="p-5 sm:p-7">
+        <div className="mb-5 flex items-start gap-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
+            <UserRound className="size-5" />
+          </span>
+          <div>
+            <h2 className="font-semibold">Account</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {user ? "Your progress is backed up and synced across devices." : "Use Tempo without an account, and sign in when you want sync."}
+            </p>
+          </div>
+        </div>
+        {user ? (
+          <div className="space-y-3 rounded-xl border bg-background p-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Email Address</p>
+              <p className="mt-1 text-sm font-medium">{user.email ?? "Signed in"}</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <Cloud className="mt-0.5 size-4 text-primary" />
+              <div>
+                <p className="text-sm font-medium">
+                  {navigator.onLine ? "Sync is automatic" : "Offline — changes will sync when connected"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Last Sync Time: {lastSync ? new Date(lastSync).toLocaleString() : "Waiting for first sync"}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 rounded-xl border bg-background p-4">
+            <div>
+              <p className="font-medium">Guest Mode</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Progress stored locally on this device.
+              </p>
+            </div>
+            {(initializationError || accountError) && (
+              <div className="space-y-2" role="alert">
+                <p className="text-sm text-destructive">
+                  {accountError ?? initializationError}
+                </p>
+                {initializationError?.includes("guest data could not be migrated") && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void retryDataMigration()}
+                  >
+                    Retry data migration
+                  </Button>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={() => void continueWithGoogle()} disabled={!supabaseConfigured}>
+                Continue with Google
+              </Button>
+              <Link
+                to="/login"
+                className="inline-flex h-10 items-center justify-center rounded-lg border px-4 text-sm font-medium hover:bg-secondary"
+              >
+                Email / Password
+              </Link>
+            </div>
+          </div>
+        )}
+      </Card>
 
       <Card className="p-5 sm:p-7">
         <div className="mb-6 flex items-start gap-4">
@@ -89,7 +211,7 @@ export function SettingsPage() {
           Application version
         </p>
         <p className="mt-3 font-mono text-sm">
-          {import.meta.env.VITE_APP_VERSION ?? "v1.0.0"}
+          {import.meta.env.VITE_APP_VERSION || "v?.?.?"}
         </p>
       </Card>
 

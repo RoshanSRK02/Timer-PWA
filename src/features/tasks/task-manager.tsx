@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Check,
   ClipboardList,
   FilePlus2,
   Pencil,
@@ -16,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { useTimerPersistence } from "@/hooks/use-timer-persistence";
 import { useTaskStore } from "@/stores/use-task-store";
 import { useTimerStore } from "@/stores/use-timer-store";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { GUEST_USER_ID, useAuthStore } from "@/stores/use-auth-store";
 import { readTimerSessions } from "@/services/timer-persistence";
 import type { Task } from "@/types";
 import { SheetDialog } from "@/features/tasks/sheet-dialog";
@@ -25,11 +24,6 @@ import { TaskRow } from "@/features/tasks/task-row";
 
 type SheetDialogMode = "create" | "rename" | "delete";
 
-interface PendingCompletion {
-  taskId: string;
-  updates: TaskFormValues;
-}
-
 interface PendingTaskSwitch {
   sheetId: string;
   taskId: string;
@@ -37,7 +31,7 @@ interface PendingTaskSwitch {
 }
 
 export function TaskManager() {
-  const userId = useAuthStore((state) => state.user?.id);
+  const userId = useAuthStore((state) => state.user?.id) ?? GUEST_USER_ID;
   const { isLoading: isTimerLoading } = useTimerPersistence();
   const sheets = useTaskStore((state) => state.sheets);
   const activeSheetId = useTaskStore((state) => state.activeSheetId);
@@ -51,6 +45,7 @@ export function TaskManager() {
   const deleteTask = useTaskStore((state) => state.deleteTask);
   const setTaskStatus = useTaskStore((state) => state.setTaskStatus);
   const timerStatus = useTimerStore((state) => state.status);
+  const timerStartedAt = useTimerStore((state) => state.startedAt);
   const timerTaskId = useTimerStore((state) => state.taskId);
   const timerTaskSheetId = useTimerStore((state) => state.taskSheetId);
   const timerIsBreak = useTimerStore((state) => state.breakSession);
@@ -60,6 +55,10 @@ export function TaskManager() {
   const startTask = useTimerStore((state) => state.startTask);
   const switchTask = useTimerStore((state) => state.switchTask);
   const pauseTimer = useTimerStore((state) => state.pause);
+  const completeActiveTask = useTimerStore(
+    (state) => state.completeActiveTask,
+  );
+  const resetTimerDisplay = useTimerStore((state) => state.resetDisplay);
   const resolveTaskCompletion = useTimerStore(
     (state) => state.resolveTaskCompletion,
   );
@@ -70,10 +69,6 @@ export function TaskManager() {
   const [sheetDialog, setSheetDialog] = useState<SheetDialogMode | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [pendingCompletion, setPendingCompletion] =
-    useState<PendingCompletion | null>(null);
-  const [completionConfirmationTask, setCompletionConfirmationTask] =
-    useState<Task | null>(null);
   const [pendingTaskSwitch, setPendingTaskSwitch] =
     useState<PendingTaskSwitch | null>(null);
   const [manualCompletionAnimationTaskId, setManualCompletionAnimationTaskId] =
@@ -82,28 +77,29 @@ export function TaskManager() {
   const sessionsQuery = useQuery({
     queryKey: ["timer-sessions", userId],
     queryFn: () => readTimerSessions(userId!),
-    enabled: Boolean(userId),
+    enabled: true,
   });
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleTasks = useMemo(() => {
     const tasks = (activeSheet?.tasks ?? [])
       .filter((task) =>
-        task.title.toLocaleLowerCase().includes(normalizedQuery),
+        `${task.title} ${task.description ?? ""}`
+          .toLocaleLowerCase()
+          .includes(normalizedQuery),
       )
       .filter((task) =>
         taskFilter === "All"
           ? true
           : taskFilter === "Completed"
             ? task.status === "Completed"
-            : task.status !== "Completed",
+            : task.status !== "Completed" && task.status !== "Archived",
       );
     return tasks.sort((first, second) =>
       Number(first.status === "Completed") -
       Number(second.status === "Completed"),
     );
   }, [activeSheet?.tasks, normalizedQuery, taskFilter]);
-  const editingPendingCompletion = pendingCompletion?.taskId;
   const isTimerTask = (task: Task) =>
     timerTaskId === task.id && timerTaskSheetId === activeSheet?.id;
   const activeSheetHasTimerTask =
@@ -164,18 +160,17 @@ export function TaskManager() {
   ]);
 
   useEffect(() => {
-    if (!completionConfirmationTask && !pendingTaskSwitch) return;
+    if (!pendingTaskSwitch) return;
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setCompletionConfirmationTask(null);
         setPendingTaskSwitch(null);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [completionConfirmationTask, pendingTaskSwitch]);
+  }, [pendingTaskSwitch]);
 
   useEffect(() => {
     if (!manualCompletionAnimationTaskId) return;
@@ -223,46 +218,12 @@ export function TaskManager() {
     const safeValues = { ...values, title: values.title.trim() };
     if (!editingTask) {
       addTask(activeSheet.id, safeValues);
-    } else if (
-      safeValues.status === "Completed" &&
-      editingTask.status !== "Completed"
-    ) {
-      setPendingCompletion({ taskId: editingTask.id, updates: safeValues });
-      updateTask(activeSheet.id, editingTask.id, {
-        ...safeValues,
-        status: editingTask.status,
-      });
     } else {
       updateTask(activeSheet.id, editingTask.id, safeValues);
     }
 
     setTaskDialogOpen(false);
     setEditingTask(null);
-  }
-
-  function finishEditedCompletion(taskId: string) {
-    if (!activeSheet) return;
-    if (pendingCompletion?.taskId === taskId) {
-      updateTask(activeSheet.id, taskId, pendingCompletion.updates);
-      setPendingCompletion(null);
-      return;
-    }
-
-    setTaskStatus(activeSheet.id, taskId, "Completed", "manual");
-  }
-
-  function confirmManualCompletion() {
-    if (!completionConfirmationTask) return;
-    setManualCompletionAnimationTaskId(completionConfirmationTask.id);
-    if (activeSheet) {
-      setTaskStatus(
-        activeSheet.id,
-        completionConfirmationTask.id,
-        "Completed",
-        "manual",
-      );
-    }
-    setCompletionConfirmationTask(null);
   }
 
   function confirmSheetDialog(name?: string) {
@@ -292,11 +253,21 @@ export function TaskManager() {
       timerTaskId === task.id && timerTaskSheetId === activeSheet.id;
     if (timerStatus !== "idle" && !sameTimerTask) {
       if (
-        (timerStatus === "running" || timerStatus === "paused") &&
+        (timerStatus === "running" ||
+          timerStatus === "paused" ||
+          timerStatus === "overtime") &&
         !timerIsBreak &&
         timerTaskId &&
         timerTaskSheetId
       ) {
+        if (window.matchMedia("(max-width: 767px)").matches) {
+          if (!switchTask(activeSheet.id, task.id, task.estimatedMinutes)) {
+            setTaskActionError("The task timer could not be switched.");
+            return;
+          }
+          setTaskActionError(null);
+          return;
+        }
         setPendingTaskSwitch({
           sheetId: activeSheet.id,
           taskId: task.id,
@@ -463,7 +434,7 @@ export function TaskManager() {
                 onClick={() => setTaskFilter(filter)}
                 className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
                   taskFilter === filter
-                    ? "bg-card text-foreground shadow-sm"
+                    ? "bg-primary text-white shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -480,8 +451,6 @@ export function TaskManager() {
                 key={task.id}
                 task={task}
                 completionRequested={
-                  editingPendingCompletion === task.id ||
-                  (timerCompletionConfirmed && isTimerTask(task)) ||
                   manualCompletionAnimationTaskId === task.id
                 }
                 onEdit={() => openEditTask(task)}
@@ -490,24 +459,43 @@ export function TaskManager() {
                   !isTimerTask(task) &&
                   deleteTask(activeSheet.id, task.id)
                 }
+                onDuplicate={() =>
+                  activeSheet &&
+                  addTask(activeSheet.id, {
+                    title: `${task.title} copy`,
+                    description: task.description,
+                    estimatedMinutes: task.estimatedMinutes,
+                    status: "Pending",
+                  })
+                }
+                onArchive={() =>
+                  activeSheet &&
+                  setTaskStatus(activeSheet.id, task.id, "Archived")
+                }
                 onPlay={() => startTaskTimer(task)}
                 onPause={pauseTimer}
-                onComplete={() => setCompletionConfirmationTask(task)}
+                onComplete={() => {
+                  if (!activeSheet) return;
+                  setManualCompletionAnimationTaskId(task.id);
+                  if (isTimerTask(task) && timerStatus !== "idle") {
+                    completeActiveTask();
+                  } else {
+                    setTaskStatus(activeSheet.id, task.id, "Completed", "manual");
+                    resetTimerDisplay();
+                  }
+                }}
                 onCompletionAnimationComplete={() =>
-                  timerCompletionConfirmed && isTimerTask(task)
-                    ? resolveTaskCompletion(true)
-                    : finishEditedCompletion(task.id)
+                  setManualCompletionAnimationTaskId(null)
                 }
                 disableEditDelete={isTimerTask(task)}
                 disablePlay={isTimerLoading}
                 disablePause={
                   !isTimerTask(task) ||
-                  timerStatus !== "running" ||
+                  (timerStatus !== "running" &&
+                    !(timerStatus === "overtime" && Boolean(timerStartedAt))) ||
                   timerIsBreak
                 }
-                disableCompletion={
-                  isTimerTask(task) && timerStatus !== "idle"
-                }
+                disableCompletion={false}
               />
             ))}
           </AnimatePresence>
@@ -557,6 +545,15 @@ export function TaskManager() {
               setEditingTask(null);
             }}
             onSave={saveTask}
+            onDelete={
+              editingTask && activeSheet && !isTimerTask(editingTask)
+                ? () => {
+                    deleteTask(activeSheet.id, editingTask.id);
+                    setTaskDialogOpen(false);
+                    setEditingTask(null);
+                  }
+                : undefined
+            }
           />
         )}
         {sheetDialog && (
@@ -616,59 +613,6 @@ export function TaskManager() {
                 </Button>
                 <Button type="button" onClick={confirmTaskSwitch}>
                   Pause &amp; Start
-                </Button>
-              </div>
-            </motion.section>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {completionConfirmationTask && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
-            role="presentation"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) {
-                setCompletionConfirmationTask(null);
-              }
-            }}
-          >
-            <motion.section
-              initial={{ opacity: 0, y: 8, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="complete-task-title"
-              aria-describedby="complete-task-description"
-              className="w-full max-w-sm rounded-2xl border bg-card p-5 shadow-2xl sm:p-6"
-            >
-              <h2 id="complete-task-title" className="text-lg font-semibold">
-                Complete this task?
-              </h2>
-              <p
-                id="complete-task-description"
-                className="mt-2 text-sm leading-6 text-muted-foreground"
-              >
-                Mark{" "}
-                <span className="font-medium text-foreground">
-                  {completionConfirmationTask.title}
-                </span>{" "}
-                as complete without starting a focus timer?
-              </p>
-              <div className="mt-6 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setCompletionConfirmationTask(null)}
-                >
-                  Cancel
-                </Button>
-                <Button type="button" onClick={confirmManualCompletion}>
-                  <Check className="size-4" /> Complete task
                 </Button>
               </div>
             </motion.section>

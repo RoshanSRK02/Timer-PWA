@@ -6,8 +6,20 @@ export type TimerStatus =
   | "awaiting-completion"
   | "overtime";
 
+export interface SuspendedFocusTimer {
+  status: "running" | "paused" | "overtime";
+  wasRunning: boolean;
+  taskSheetId: string | null;
+  taskId: string | null;
+  durationSeconds: number;
+  accumulatedSeconds: number;
+  sessionId: string | null;
+  sessionStartedAt: string | null;
+}
+
 export interface TimerSnapshot {
   userId: string;
+  displayReset: boolean;
   status: TimerStatus;
   taskSheetId: string | null;
   taskId: string | null;
@@ -18,6 +30,8 @@ export interface TimerSnapshot {
   sessionStartedAt: string | null;
   breakSession: boolean;
   breakLabel: string | null;
+  breakComplete: boolean;
+  suspendedFocus: SuspendedFocusTimer | null;
   updatedAt: string;
   completedSessions: number;
   completionConfirmed: boolean;
@@ -61,6 +75,7 @@ export type TaskCompletionMethod = "manual" | "timer";
 export interface Task {
   id: string;
   title: string;
+  description?: string;
   estimatedMinutes: number;
   actualMinutes: number | null;
   status: TaskStatus;

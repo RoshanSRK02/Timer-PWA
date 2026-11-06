@@ -1,4 +1,4 @@
-const CACHE_NAME = "tempo-app-shell-v2";
+const CACHE_NAME = "tempo-app-shell-__APP_VERSION__";
 const APP_SHELL_URL = new URL("./", self.registration.scope).href;
 
 self.addEventListener("install", (event) => {
@@ -6,7 +6,7 @@ self.addEventListener("install", (event) => {
     caches
       .open(CACHE_NAME)
       .then((cache) => cache.add(APP_SHELL_URL))
-      .then(() => self.skipWaiting()),
+      .then(() => undefined),
   );
 });
 
@@ -23,6 +23,12 @@ self.addEventListener("activate", (event) => {
       )
       .then(() => self.clients.claim()),
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "TEMPO_SKIP_WAITING") {
+    void self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (event) => {

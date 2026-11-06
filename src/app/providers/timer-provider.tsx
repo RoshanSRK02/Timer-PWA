@@ -6,7 +6,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import { TimerPersistenceContext } from "@/app/providers/timer-context";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { GUEST_USER_ID, useAuthStore } from "@/stores/use-auth-store";
 import { useTimerStore } from "@/stores/use-timer-store";
 import {
   chooseLatestSnapshot,
@@ -24,6 +24,7 @@ import {
   sendTimerPush,
 } from "@/services/push-notifications";
 import { showTimerNotification } from "@/services/timer-notifications";
+import { markSyncComplete } from "@/services/sync-status";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Timer synchronization failed.";
@@ -32,7 +33,8 @@ function getErrorMessage(error: unknown): string {
 export function TimerProvider({ children }: PropsWithChildren) {
   const user = useAuthStore((state) => state.user);
   const authLoading = useAuthStore((state) => state.isLoading);
-  const userId = user?.id ?? null;
+  const userId = user?.id ?? GUEST_USER_ID;
+  const isGuest = !user;
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
@@ -50,7 +52,7 @@ export function TimerProvider({ children }: PropsWithChildren) {
     let persistedSessionId: string | null = null;
     let writeQueue = Promise.resolve();
     const unsubscribe = useTimerStore.subscribe(() => {
-      if (!active || !hydrated || !userId) return;
+      if (!active || !hydrated) return;
       const snapshot = useTimerStore.getState().toSnapshot();
       if (!snapshot) return;
       const session =
@@ -72,13 +74,18 @@ export function TimerProvider({ children }: PropsWithChildren) {
       const writes: Promise<unknown>[] = [writeTimerSnapshot(snapshot)];
       let sessionWrite: Promise<TimerSessionRecord> | null = null;
       if (session) {
-        sessionWrite = writeRemoteTimerSession(session);
-        writes.push(writeTimerSession(session), sessionWrite);
+        writes.push(writeTimerSession(session));
+        if (!isGuest) {
+          sessionWrite = writeRemoteTimerSession(session);
+          writes.push(sessionWrite);
+        }
       }
 
       const [results, winningSnapshot] = await Promise.all([
         Promise.allSettled(writes),
-        writeRemoteTimerSnapshot(snapshot),
+        isGuest
+          ? Promise.resolve(snapshot)
+          : writeRemoteTimerSnapshot(snapshot),
       ]);
       const failures = results
         .filter((result) => result.status === "rejected")
@@ -100,6 +107,7 @@ export function TimerProvider({ children }: PropsWithChildren) {
       }
 
       if (
+        !isGuest &&
         userId &&
         Date.parse(winningSnapshot.updatedAt) > Date.parse(snapshot.updatedAt)
       ) {
@@ -113,30 +121,6 @@ export function TimerProvider({ children }: PropsWithChildren) {
       setIsLoading(true);
       setError(null);
 
-      if (!userId) {
-        useTimerStore.setState({
-          userId: null,
-          status: "idle",
-          taskSheetId: null,
-          taskId: null,
-          durationSeconds: 25 * 60,
-          accumulatedSeconds: 0,
-          startedAt: null,
-          sessionId: null,
-          sessionStartedAt: null,
-          breakSession: false,
-          breakLabel: null,
-          updatedAt: new Date().toISOString(),
-          completedSessions: 0,
-          completionConfirmed: false,
-          lastSession: null,
-        });
-        hydrated = true;
-        timerHydratedRef.current = true;
-        setIsLoading(false);
-        return;
-      }
-
       let localSnapshot: TimerSnapshot | undefined;
       let remoteSnapshot: TimerSnapshot | null = null;
       const readErrors: string[] = [];
@@ -149,10 +133,12 @@ export function TimerProvider({ children }: PropsWithChildren) {
         readErrors.push(`Local timer storage: ${getErrorMessage(readError)}`);
       }
 
-      try {
-        remoteSnapshot = await readRemoteTimerSnapshot(userId);
-      } catch (readError) {
-        readErrors.push(`Supabase timer storage: ${getErrorMessage(readError)}`);
+      if (!isGuest) {
+        try {
+          remoteSnapshot = await readRemoteTimerSnapshot(userId);
+        } catch (readError) {
+          readErrors.push(`Supabase timer storage: ${getErrorMessage(readError)}`);
+        }
       }
 
       if (!active) return;
@@ -187,10 +173,10 @@ export function TimerProvider({ children }: PropsWithChildren) {
       hydrated = false;
       unsubscribe();
     };
-  }, [authLoading, userId, retryVersion]);
+  }, [authLoading, isGuest, userId, retryVersion]);
 
   useEffect(() => {
-    if (authLoading || !userId) return;
+    if (authLoading) return;
 
     const timer = useTimerStore.getState();
     timer.completeIfExpired();
@@ -203,7 +189,7 @@ export function TimerProvider({ children }: PropsWithChildren) {
   }, [authLoading, userId]);
 
   useEffect(() => {
-    if (authLoading || isLoading || !userId) return;
+    if (authLoading || isLoading) return;
     notifiedSessionIdRef.current =
       useTimerStore.getState().lastSession?.id ?? null;
 
@@ -229,16 +215,16 @@ export function TimerProvider({ children }: PropsWithChildren) {
       void showTimerNotification(title, body).catch((notificationError: unknown) =>
         console.error("Tempo could not show the timer completion notification.", notificationError),
       );
-      if (isPushConfigured() && navigator.onLine) {
+      if (!isGuest && isPushConfigured() && navigator.onLine) {
         void sendTimerPush(title, body).catch((pushError: unknown) =>
           console.error("Tempo could not send the timer push notification.", pushError),
         );
       }
     });
-  }, [authLoading, isLoading, userId]);
+  }, [authLoading, isGuest, isLoading, userId]);
 
   useEffect(() => {
-    if (authLoading || !userId) return;
+    if (authLoading || isGuest) return;
 
     let synchronizing = false;
     const synchronizeTimer = async () => {
@@ -256,6 +242,7 @@ export function TimerProvider({ children }: PropsWithChildren) {
           readLocalTimerSessions(userId),
         ]);
         await Promise.all(sessions.map((session) => writeRemoteTimerSession(session)));
+        markSyncComplete();
         if (Date.parse(winner.updatedAt) > Date.parse(snapshot.updatedAt)) {
           useTimerStore.getState().restoreSnapshot(winner, userId);
         }
@@ -291,7 +278,7 @@ export function TimerProvider({ children }: PropsWithChildren) {
         handleServiceWorkerMessage,
       );
     };
-  }, [authLoading, userId]);
+  }, [authLoading, isGuest, userId]);
 
   const retry = useCallback(() => {
     setRetryVersion((version) => version + 1);

@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "@/services/supabase";
+import { GUEST_USER_ID } from "@/stores/use-auth-store";
 import type { TimerSessionRecord, TimerSnapshot, TimerStatus } from "@/types";
 
 const DATABASE_NAME = "tempo-timer";
@@ -25,6 +26,7 @@ function normalizeSession(session: TimerSessionRecord): TimerSessionRecord {
 
 interface RemoteTimerRow {
   user_id: string;
+  display_reset?: boolean;
   status: TimerStatus;
   task_sheet_id: string | null;
   task_id: string | null;
@@ -35,6 +37,8 @@ interface RemoteTimerRow {
   session_started_at: string | null;
   break_session: boolean;
   break_label: string | null;
+  break_complete?: boolean;
+  suspended_focus?: TimerSnapshot["suspendedFocus"];
   updated_at: string;
   completed_sessions: number;
   completion_confirmed: boolean;
@@ -163,6 +167,16 @@ export async function readLocalTimerSessions(
 export async function readTimerSessions(
   userId: string,
 ): Promise<TimerSessionHistory> {
+  if (userId === GUEST_USER_ID) {
+    return {
+      sessions: (await readLocalTimerSessions(userId)).sort(
+        (first, second) =>
+          Date.parse(second.startedAt) - Date.parse(first.startedAt),
+      ),
+      syncWarning: null,
+    };
+  }
+
   const [localResult, remoteResult] = await Promise.allSettled([
     indexedDbRequest(SESSIONS_STORE_NAME, "readonly", (store) =>
       store.getAll() as IDBRequest<TimerSessionRecord[]>,
@@ -236,6 +250,11 @@ export async function updateTimerSessionNotes(
     });
   }
 
+  if (userId === GUEST_USER_ID) {
+    if (!localSession) throw new Error("The requested local timer session was not found.");
+    return;
+  }
+
   const { data, error } = await getSupabaseClient().rpc(
     "update_pomodoro_timer_session_notes",
     { p_session_id: sessionId, p_notes: notes },
@@ -251,7 +270,7 @@ export async function readRemoteTimerSnapshot(
   const { data, error } = await getSupabaseClient()
     .from(TABLE_NAME)
     .select(
-      "user_id,status,task_sheet_id,task_id,duration_seconds,accumulated_seconds,started_at,session_id,session_started_at,break_session,break_label,updated_at,completed_sessions,completion_confirmed,last_session",
+      "user_id,display_reset,status,task_sheet_id,task_id,duration_seconds,accumulated_seconds,started_at,session_id,session_started_at,break_session,break_label,break_complete,suspended_focus,updated_at,completed_sessions,completion_confirmed,last_session",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -262,6 +281,7 @@ export async function readRemoteTimerSnapshot(
   const row = data as RemoteTimerRow;
   return {
     userId: row.user_id,
+    displayReset: row.display_reset ?? false,
     status: row.status,
     taskSheetId: row.task_sheet_id,
     taskId: row.task_id,
@@ -272,6 +292,8 @@ export async function readRemoteTimerSnapshot(
     sessionStartedAt: row.session_started_at,
     breakSession: row.break_session,
     breakLabel: row.break_label,
+    breakComplete: row.break_complete ?? false,
+    suspendedFocus: row.suspended_focus ?? null,
     updatedAt: row.updated_at,
     completedSessions: row.completed_sessions,
     completionConfirmed: row.completion_confirmed,
@@ -284,6 +306,7 @@ export async function writeRemoteTimerSnapshot(
 ): Promise<TimerSnapshot> {
   const row: RemoteTimerRow = {
     user_id: snapshot.userId,
+    display_reset: snapshot.displayReset,
     status: snapshot.status,
     task_sheet_id: snapshot.taskSheetId,
     task_id: snapshot.taskId,
@@ -294,6 +317,8 @@ export async function writeRemoteTimerSnapshot(
     session_started_at: snapshot.sessionStartedAt,
     break_session: snapshot.breakSession,
     break_label: snapshot.breakLabel,
+    break_complete: snapshot.breakComplete,
+    suspended_focus: snapshot.suspendedFocus,
     updated_at: snapshot.updatedAt,
     completed_sessions: snapshot.completedSessions,
     completion_confirmed: snapshot.completionConfirmed,
@@ -309,6 +334,7 @@ export async function writeRemoteTimerSnapshot(
   const winner = data as RemoteTimerRow;
   return {
     userId: winner.user_id,
+    displayReset: winner.display_reset ?? false,
     status: winner.status,
     taskSheetId: winner.task_sheet_id,
     taskId: winner.task_id,
@@ -319,6 +345,8 @@ export async function writeRemoteTimerSnapshot(
     sessionStartedAt: winner.session_started_at,
     breakSession: winner.break_session,
     breakLabel: winner.break_label,
+    breakComplete: winner.break_complete ?? false,
+    suspendedFocus: winner.suspended_focus ?? null,
     updatedAt: winner.updated_at,
     completedSessions: winner.completed_sessions,
     completionConfirmed: winner.completion_confirmed,

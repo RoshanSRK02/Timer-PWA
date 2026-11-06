@@ -114,7 +114,7 @@ export function BreakDrawer({
             </form>
             {disabled && (
               <p className="mt-3 text-xs text-muted-foreground">
-                Stop the current timer before starting a break.
+                A break is already active. Resume your focus session or extend the break.
               </p>
             )}
           </motion.aside>

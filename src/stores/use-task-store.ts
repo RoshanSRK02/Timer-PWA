@@ -17,7 +17,8 @@ interface TaskState {
   setActiveSheet: (sheetId: string) => void;
   addTask: (
     sheetId: string,
-    task: Pick<Task, "title" | "estimatedMinutes" | "status">,
+    task: Pick<Task, "title" | "estimatedMinutes" | "status"> &
+      Partial<Pick<Task, "description">>,
   ) => void;
   updateTask: (
     sheetId: string,
@@ -25,7 +26,8 @@ interface TaskState {
     updates: Pick<
       Task,
       "title" | "estimatedMinutes" | "status"
-    >,
+    > &
+      Partial<Pick<Task, "description">>,
   ) => void;
   deleteTask: (sheetId: string, taskId: string) => void;
   setTaskStatus: (

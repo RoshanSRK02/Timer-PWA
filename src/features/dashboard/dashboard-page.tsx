@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -6,16 +6,12 @@ import {
   CheckCircle2,
   Check,
   Coffee,
-  Expand,
   Focus,
-  Keyboard,
-  Minimize2,
   Pause,
   Play,
   Plus,
   TimerReset,
   Sparkles,
-  Square,
   Target,
   Zap,
 } from "lucide-react";
@@ -72,10 +68,8 @@ export function DashboardPage() {
     setDuration,
     start,
     pause,
-    stop,
     extend,
     finishEarly,
-    confirmTaskCompletion,
     resolveTaskCompletion,
   } = timer;
   const { isLoading: isTimerLoading, error: timerPersistenceError, retry } =
@@ -91,7 +85,6 @@ export function DashboardPage() {
   const [clockNow, setClockNow] = useState(Date.now());
   const [breakDrawerOpen, setBreakDrawerOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(true);
   const [alarmError, setAlarmError] = useState<string | null>(null);
   const [nextTaskPrompt, setNextTaskPrompt] = useState<{
     sheetId: string;
@@ -125,6 +118,36 @@ export function DashboardPage() {
     ? Math.max(0, Math.ceil((nextTaskPrompt.deadline - clockNow) / 1000))
     : 0;
 
+  const toggleFocusMode = useCallback(async () => {
+    setTimerStageError(null);
+    if (focusMode) {
+      setFocusMode(false);
+      try {
+        if (document.fullscreenElement === timerStageRef.current) {
+          await document.exitFullscreen();
+        }
+      } catch (error) {
+        setTimerStageError(
+          error instanceof Error
+            ? error.message
+            : "Fullscreen mode could not be closed.",
+        );
+      }
+      return;
+    }
+
+    setFocusMode(true);
+    try {
+      await timerStageRef.current?.requestFullscreen();
+    } catch (error) {
+      setTimerStageError(
+        error instanceof Error
+          ? error.message
+          : "Fullscreen mode could not be opened.",
+      );
+    }
+  }, [focusMode]);
+
   useEffect(() => {
     if (
       status !== "running" &&
@@ -136,18 +159,24 @@ export function DashboardPage() {
   }, [status, timer.startedAt, nextTaskPrompt]);
 
   useEffect(() => {
-    const handleToggleDrawer = () => setIsTaskPanelOpen((open) => !open);
-    const handleToggleFocus = () => setFocusMode((active) => !active);
+    const handleToggleFocus = () => void toggleFocusMode();
     const handleShowShortcuts = () => setShortcutsOpen(true);
-    window.addEventListener("tempo:toggle-drawer", handleToggleDrawer);
     window.addEventListener("tempo:toggle-focus", handleToggleFocus);
     window.addEventListener("tempo:show-shortcuts", handleShowShortcuts);
     return () => {
-      window.removeEventListener("tempo:toggle-drawer", handleToggleDrawer);
       window.removeEventListener("tempo:toggle-focus", handleToggleFocus);
       window.removeEventListener("tempo:show-shortcuts", handleShowShortcuts);
     };
-  }, []);
+  }, [toggleFocusMode]);
+
+  useEffect(() => {
+    if (!focusMode) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") void toggleFocusMode();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [focusMode, toggleFocusMode]);
 
   useEffect(() => {
     document.body.classList.toggle("focus-mode", focusMode);
@@ -194,7 +223,9 @@ export function DashboardPage() {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === timerStageRef.current);
+      const fullscreen = document.fullscreenElement === timerStageRef.current;
+      setIsFullscreen(fullscreen);
+      if (!fullscreen) setFocusMode(false);
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
@@ -203,6 +234,12 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    if (!hasHydratedTimerRef.current) {
+      lastAlarmStatusRef.current = status;
+      lastSessionIdRef.current = timer.lastSession?.id ?? null;
+      return;
+    }
+
     const enteredCompletion = status === "awaiting-completion" &&
       lastAlarmStatusRef.current !== "awaiting-completion";
     const endedBreak =
@@ -220,6 +257,7 @@ export function DashboardPage() {
     });
   }, [
     alarmSound,
+    isTimerLoading,
     status,
     timer.lastSession?.breakSession,
     timer.lastSession?.id,
@@ -310,23 +348,6 @@ export function DashboardPage() {
     taskSheets,
   ]);
 
-  async function toggleFullscreen() {
-    setTimerStageError(null);
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await timerStageRef.current?.requestFullscreen();
-      }
-    } catch (error) {
-      setTimerStageError(
-        error instanceof Error
-          ? error.message
-          : "Fullscreen mode could not be opened.",
-      );
-    }
-  }
-
   function startNextTaskNow() {
     if (!nextTaskPrompt) return;
     const sheet = taskSheets.find(
@@ -381,13 +402,7 @@ export function DashboardPage() {
             </Button>
             <Button
               type="button"
-              onClick={() =>
-                activeTask &&
-                !focusMode &&
-                isTaskPanelOpen
-                  ? confirmTaskCompletion()
-                  : resolveTaskCompletion(true)
-              }
+              onClick={() => resolveTaskCompletion(true)}
               className="bg-emerald-600 text-white hover:bg-emerald-700"
             >
               <Check className="size-4" /> Yes
@@ -400,7 +415,7 @@ export function DashboardPage() {
     <BreakDrawer
       open={breakDrawerOpen}
       onClose={() => setBreakDrawerOpen(false)}
-      disabled={status !== "idle" || isTimerLoading}
+      disabled={timer.breakSession || status === "awaiting-completion" || isTimerLoading}
     />
   );
   const nextTaskPromptView = (
@@ -496,51 +511,15 @@ export function DashboardPage() {
         <div className="flex flex-wrap items-center justify-end gap-2">
           <PopOutTimerButton />
           <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setFocusMode((active) => !active)}
-            aria-pressed={focusMode}
-            title="Toggle Focus Mode (Shift+F)"
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void toggleFocusMode()}
+          aria-pressed={focusMode}
+          title={focusMode ? "Exit Focus Mode (Esc)" : "Enter Focus Mode"}
           >
-            <Focus className="size-4" />
-            <span className="hidden sm:inline">{focusMode ? "Exit focus" : "Focus mode"}</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="focus-hidden size-9"
-            onClick={() => setShortcutsOpen(true)}
-            aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts (?)"
-          >
-            <Keyboard className="size-4" />
-          </Button>
-          {isFullscreen && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIsTaskPanelOpen((open) => !open)}
-            >
-              <span>{isTaskPanelOpen ? "Hide tasks" : "Show tasks"}</span>
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void toggleFullscreen()}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="size-4" />
-            ) : (
-              <Expand className="size-4" />
-            )}
-            <span className="hidden sm:inline">
-              {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-            </span>
+          <Focus className="size-4" />
+          <span>{focusMode ? "Exit Focus" : "Focus Mode"}</span>
           </Button>
         </div>
         {timerStageError && (
@@ -560,9 +539,9 @@ export function DashboardPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.08 }}
         >
-          <Card className="relative flex min-h-[480px] flex-col items-center justify-center overflow-hidden px-5 py-10 sm:min-h-[520px]">
+          <Card className="timer-card relative flex min-h-[480px] flex-col items-center justify-center overflow-hidden px-5 py-10 sm:min-h-[520px]">
             <div className="oled-hidden pointer-events-none absolute -right-24 -top-32 size-80 rounded-full bg-primary/[0.05] blur-3xl" />
-            <div className="focus-hidden relative mb-8 flex items-center gap-1 rounded-xl bg-secondary p-1">
+            <div className={`timer-preset-tabs focus-hidden relative mb-8 flex items-center gap-1 rounded-xl bg-secondary p-1 ${timer.breakSession ? "hidden" : ""}`}>
               {presets.map(({ label, minutes, icon: Icon }) => (
                 <button
                   type="button"
@@ -572,7 +551,7 @@ export function DashboardPage() {
                   aria-pressed={selectedPreset === label}
                   className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition sm:px-4 sm:text-sm ${
                     selectedPreset === label
-                      ? "bg-card text-foreground shadow-sm"
+                      ? "bg-primary text-white shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -583,7 +562,7 @@ export function DashboardPage() {
               ))}
             </div>
 
-            <div className="relative flex size-64 items-center justify-center sm:size-[290px]">
+            <div className="timer-visualization relative flex size-64 items-center justify-center sm:size-[290px]">
               <svg
                 className="absolute inset-0 size-full -rotate-90"
                 viewBox="0 0 280 280"
@@ -619,10 +598,10 @@ export function DashboardPage() {
                 <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
                   {status === "overtime"
                     ? "OVERTIME"
+                    : timer.breakSession
+                      ? "BREAK"
                     : activeTask
                     ? "Task focus"
-                    : timer.breakSession
-                      ? timer.breakLabel ?? "Break"
                     : status === "awaiting-completion"
                       ? "Session complete"
                     : status === "running"
@@ -636,7 +615,9 @@ export function DashboardPage() {
               totalSeconds={
                 status === "overtime"
                   ? overtimeSeconds
-                  : status === "idle" && timer.lastSession?.outcome === "completed"
+                    : status === "idle" && timer.displayReset
+                      ? 0
+                    : status === "idle" && timer.lastSession?.outcome === "completed"
                     ? 0
                     : remainingSeconds
               }
@@ -656,19 +637,34 @@ export function DashboardPage() {
                     : "A little progress goes a long way")}
             </p>
 
-            <div className="relative mt-8 flex items-center gap-3">
-              {status === "running" || status === "paused" || status === "overtime" ? (
+            {timer.breakSession && timer.breakComplete && (
+              <div
+                className="relative mt-4 flex flex-wrap items-center justify-center gap-2 rounded-xl border border-primary/30 bg-accent/40 p-3"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="w-full text-center text-sm font-semibold">
+                  Break Complete
+                </span>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => stop()}
-                  disabled={isTimerLoading}
-                  aria-label="Stop timer and save progress"
-                  title="Stop and save progress"
+                  type="button"
+                  size="sm"
+                  onClick={() => timer.resumeFocusSession()}
                 >
-                  <Square className="size-4 fill-current" />
+                  Resume Focus Session
                 </Button>
-              ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => timer.extendBreak(5)}
+                >
+                  Extend Break
+                </Button>
+              </div>
+            )}
+
+            <div className={`timer-primary-controls relative mt-8 flex items-center gap-3 ${timer.breakComplete ? "hidden" : ""}`}>
               {status === "overtime" ? (
                 <Button
                   size="default"
@@ -703,7 +699,7 @@ export function DashboardPage() {
                 </Button>
               )}
             </div>
-            <div className="relative mt-4 flex flex-wrap items-center justify-center gap-2">
+            <div className={`timer-extension-controls relative mt-4 flex flex-wrap items-center justify-center gap-2 ${timer.breakComplete ? "hidden" : ""}`}>
               {[5, 10, 15, 30].map((minutes) => (
                 <Button
                   type="button"
@@ -737,24 +733,33 @@ export function DashboardPage() {
               {status === "overtime" ? "Finish" : "Finish early"}
               </Button>
             </div>
-            <div className="focus-hidden relative mt-4 flex flex-wrap items-center justify-center gap-2">
+            <div className="timer-secondary-controls relative mt-4 flex w-full flex-col items-center gap-4">
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant={
+                  status === "running" || status === "paused" || status === "overtime"
+                    ? "default"
+                    : "outline"
+                }
                 disabled={
-                  status !== "idle" ||
-                  isTimerLoading ||
-                  taskSheets
-                    .flatMap((sheet) => sheet.tasks)
-                    .some((task) => task.status === "InProgress")
+                  timer.breakSession ||
+                  status === "awaiting-completion" ||
+                  isTimerLoading
                 }
                 onClick={() => setBreakDrawerOpen(true)}
+                className={
+                  status === "running" || status === "paused" || status === "overtime"
+                    ? "bg-primary text-white hover:bg-primary/90"
+                    : ""
+                }
               >
                 <Coffee className="size-4" /> Take a break
               </Button>
-              <TimerSettings />
-              <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <div className="flex w-full flex-wrap items-end justify-center gap-3">
+                <TimerSettings />
+              </div>
+              <label className="flex min-h-11 items-center gap-2 text-xs font-medium text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={autoPlay}
@@ -865,10 +870,10 @@ export function DashboardPage() {
             <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} />
           )}
         </AnimatePresence>
-        {isFullscreen && isTaskPanelOpen && !focusMode && <TaskManager />}
+        {isFullscreen && !focusMode && <TaskManager />}
       </div>
 
-      {!isFullscreen && isTaskPanelOpen && !focusMode && <TaskManager />}
+      {!isFullscreen && !focusMode && <TaskManager />}
       </div>
 
       {isFullscreen && timerStageRef.current

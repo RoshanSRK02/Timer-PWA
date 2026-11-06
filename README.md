@@ -1,6 +1,7 @@
 # Tempo
 
-Tempo is a React, TypeScript, and Vite application with Supabase authentication.
+Tempo is a React, TypeScript, and Vite study timer. It works in Guest Mode and
+uses Supabase authentication for optional cross-device synchronization.
 
 ## Run locally
 
@@ -163,7 +164,7 @@ per-user workspace sync queue. Task creation, edits, deletion, completion, and
 starting a timer remain available offline. Timer snapshots and all locally
 recorded sessions are retried to Supabase when connectivity returns.
 
-Apply Supabase migrations `202611020001` through `202611020009` in filename
+Apply Supabase migrations `202611020001` through `202611020011` in filename
 order after configuring Supabase Auth. Migration `202611020003` creates the
 RLS-protected workspace table, and `202611020009` installs timestamp-based
 synchronization RPCs and removes legacy conflict queue states. Local edits
@@ -172,6 +173,29 @@ timestamp automatically wins and is applied without a user prompt. The queue
 retries automatically when connectivity returns and periodically while the app
 is open. Timer state uses the same server-side timestamp comparison and a
 single per-user database row, so devices converge on one active timer state.
+Migration `202611020010` adds synchronized suspended-focus data so breaks can
+pause and later resume the same focus session across devices.
+Migration `202611020011` adds the profile preferences field used when guest
+settings are copied to an account.
+
+## Guest Mode and account migration
+
+The application can be used without signing in. Guest task workspaces, timer
+snapshots, and focus/break sessions are stored locally in IndexedDB; theme and
+timer preferences remain in browser storage. Analytics, history, task sheets,
+breaks, and timer controls remain available offline.
+
+Signing in with Google or email/password merges guest sheets and tasks with the
+account workspace, copies local timer sessions, carries over the current timer
+state when it is the newest state, and merges preferences into the account
+profile. Guest records are retained locally until migration succeeds. Apply
+`202611020011_guest_settings.sql` after the earlier migrations before enabling
+account migration in a deployed Supabase project.
+
+The GitHub Pages workflow injects the `package.json` version into the build.
+Service-worker updates notify users when a new deployment is available; the
+update action activates the new worker, invalidates the previous app-shell
+cache, and reloads the application.
 
 ## FocusFlow relational database schema
 

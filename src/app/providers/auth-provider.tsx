@@ -1,6 +1,7 @@
 import { useEffect, type PropsWithChildren } from "react";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { getSupabaseClient, isSupabaseConfigured } from "@/services/supabase";
+import { migrateGuestData } from "@/services/guest-migration";
 
 export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
@@ -9,12 +10,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setIsLoading,
       setUser,
     } = useAuthStore.getState();
-
-    console.log("SUPABASE URL:", import.meta.env.VITE_SUPABASE_URL);
-    console.log(
-      "SUPABASE KEY EXISTS:",
-      Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY),
-    );
 
     if (!isSupabaseConfigured()) {
       setUser(null);
@@ -28,6 +23,39 @@ export function AuthProvider({ children }: PropsWithChildren) {
     let authEventReceived = false;
     let active = true;
     let unsubscribe = () => {};
+    let activation = Promise.resolve();
+    let activationRevision = 0;
+
+    function activateUser(user: import("@supabase/supabase-js").User | null) {
+      const revision = ++activationRevision;
+      if (!user) {
+        setUser(null);
+        setInitializationError(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      activation = activation.then(async () => {
+        if (!active || revision !== activationRevision) return;
+        try {
+          await migrateGuestData(user.id);
+          if (!active || revision !== activationRevision) return;
+          setUser(user);
+          setInitializationError(null);
+        } catch (error) {
+          if (!active || revision !== activationRevision) return;
+          setUser(null);
+          setInitializationError(
+            error instanceof Error
+              ? `Your sign-in succeeded, but guest data could not be migrated: ${error.message}`
+              : "Your sign-in succeeded, but guest data could not be migrated.",
+          );
+        } finally {
+          if (active && revision === activationRevision) setIsLoading(false);
+        }
+      });
+    }
 
     try {
       const supabase = getSupabaseClient();
@@ -35,9 +63,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((_event, session) => {
         authEventReceived = true;
-        setUser(session?.user ?? null);
-        setInitializationError(null);
-        setIsLoading(false);
+        activateUser(session?.user ?? null);
       });
       unsubscribe = () => subscription.unsubscribe();
 
@@ -47,9 +73,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           if (!active || authEventReceived) return;
           if (error) throw error;
 
-          setUser(data.session?.user ?? null);
-          setInitializationError(null);
-          setIsLoading(false);
+          activateUser(data.session?.user ?? null);
         })
         .catch((error: unknown) => {
           if (!active || authEventReceived) return;

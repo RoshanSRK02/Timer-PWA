@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PropsWithChildren } from "react";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { GUEST_USER_ID, useAuthStore } from "@/stores/use-auth-store";
 import { useTaskStore } from "@/stores/use-task-store";
 import {
   offlineDatabase,
@@ -12,6 +12,7 @@ import {
   readRemoteWorkspace,
   syncWorkspaceQueue,
 } from "@/services/workspace-sync";
+import { markSyncComplete } from "@/services/sync-status";
 
 function applyWorkspace(workspace: OfflineWorkspace): void {
   const current = useTaskStore.getState();
@@ -29,7 +30,8 @@ function applyWorkspace(workspace: OfflineWorkspace): void {
 export function OfflineSyncProvider({ children }: PropsWithChildren) {
   const user = useAuthStore((state) => state.user);
   const authLoading = useAuthStore((state) => state.isLoading);
-  const userId = user?.id ?? null;
+  const userId = user?.id ?? GUEST_USER_ID;
+  const isGuest = !user;
   const [isLoading, setIsLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -67,6 +69,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
   const runSync = useCallback(async () => {
     if (
       !userId ||
+      isGuest ||
       initializedUser.current !== userId ||
       !navigator.onLine ||
       syncInProgress.current
@@ -77,6 +80,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
     setSyncError(null);
     try {
       const workspace = await syncWorkspaceQueue(userId);
+      markSyncComplete();
       const current = useTaskStore.getState().sheets;
       if (JSON.stringify(current) !== JSON.stringify(workspace.sheets)) {
         applyRemote(workspace);
@@ -88,7 +92,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
     } finally {
       syncInProgress.current = false;
     }
-  }, [applyRemote, userId]);
+  }, [applyRemote, isGuest, userId]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -105,7 +109,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
   }, [runSync]);
 
   useEffect(() => {
-    if (!userId || !isOnline || initializedUser.current !== userId) return;
+    if (isGuest || !userId || !isOnline || initializedUser.current !== userId) return;
     const intervalId = window.setInterval(() => void runSync(), 10_000);
     const handleFocus = () => void runSync();
     window.addEventListener("focus", handleFocus);
@@ -113,7 +117,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
     };
-  }, [isOnline, runSync, userId]);
+  }, [isGuest, isOnline, runSync, userId]);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -141,6 +145,26 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
 
     async function initialize() {
       let local = await readLocalWorkspace(currentUserId);
+      if (isGuest) {
+        if (!local) {
+          local = {
+            userId: GUEST_USER_ID,
+            sheets: useTaskStore.getState().sheets,
+            updatedAt: new Date().toISOString(),
+          };
+          await offlineDatabase.workspaces.put(local);
+        }
+        if (!active) return;
+        applyRemote(local);
+        initializedUser.current = currentUserId;
+        await offlineDatabase.workspaceOwners.put({
+          id: "active",
+          userId: currentUserId,
+        });
+        setIsLoading(false);
+        return;
+      }
+
       const owner = await offlineDatabase.workspaceOwners.get("active");
       let remote: OfflineWorkspace | null = null;
       let remoteError: unknown = null;
@@ -217,6 +241,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
     requestBackgroundSync,
     runSync,
     userId,
+    isGuest,
   ]);
 
   useEffect(() => {
@@ -231,10 +256,13 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
         updatedAt: new Date().toISOString(),
       };
       writeChain.current = writeChain.current
-        .then(() => queueWorkspaceChange(workspace))
-        .then(() => requestBackgroundSync())
+        .then(async () => {
+          if (isGuest) await offlineDatabase.workspaces.put(workspace);
+          else await queueWorkspaceChange(workspace);
+        })
+        .then(() => (isGuest ? undefined : requestBackgroundSync()))
         .then(() => {
-          if (navigator.onLine) void runSync();
+          if (!isGuest && navigator.onLine) void runSync();
         })
         .catch((error: unknown) => {
           setSyncError(
@@ -245,7 +273,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
         });
     });
     return unsubscribe;
-  }, [isLoading, requestBackgroundSync, runSync, userId]);
+  }, [isGuest, isLoading, requestBackgroundSync, runSync, userId]);
 
   if (authLoading || isLoading) {
     return (

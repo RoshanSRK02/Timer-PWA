@@ -1,9 +1,8 @@
-import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 
 export function ProtectedRoute() {
-  const { user, isLoading } = useAuth();
-  const location = useLocation();
+  const { isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -14,16 +13,6 @@ export function ProtectedRoute() {
           aria-label="Checking your session"
         />
       </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ from: location }}
-      />
     );
   }
 

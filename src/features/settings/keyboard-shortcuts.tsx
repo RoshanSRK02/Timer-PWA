@@ -15,9 +15,8 @@ const shortcutSections = [
   {
     title: "Navigation",
     shortcuts: [
-      ["T", "Toggle Task Drawer"],
       ["O", "OLED Mode"],
-      ["Shift + F", "Toggle Focus Mode"],
+      ["Shift + F", "Enter / Exit Focus Mode"],
     ],
   },
   { title: "General", shortcuts: [["?", "Show Shortcuts"]] },

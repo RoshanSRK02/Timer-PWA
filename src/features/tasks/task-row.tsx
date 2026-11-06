@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
+  Archive,
+  Copy,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -16,6 +18,8 @@ interface TaskRowProps {
   completionRequested?: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onDuplicate: () => void;
+  onArchive: () => void;
   onPlay: () => void;
   onPause: () => void;
   onComplete: () => void;
@@ -31,6 +35,8 @@ export function TaskRow({
   completionRequested = false,
   onEdit,
   onDelete,
+  onDuplicate,
+  onArchive,
   onPlay,
   onPause,
   onComplete,
@@ -42,12 +48,21 @@ export function TaskRow({
 }: TaskRowProps) {
   const [isCompleting, setIsCompleting] = useState(false);
   const [showCheck, setShowCheck] = useState(task.status === "Completed");
-  const [isHovered, setIsHovered] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const previousStatus = useRef(task.status);
 
   useEffect(() => {
     if (completionRequested) setIsCompleting(true);
   }, [completionRequested]);
+
+  useEffect(() => {
+    const completed = task.status === "Completed";
+    setShowCheck(completed);
+    if (completed && previousStatus.current !== "Completed") {
+      setIsCompleting(true);
+    }
+    previousStatus.current = task.status;
+  }, [task.status]);
 
   const completeAnimation = () => {
     setShowCheck(true);
@@ -70,9 +85,7 @@ export function TaskRow({
       }}
       exit={{ opacity: 0, height: 0, marginTop: 0, overflow: "hidden" }}
       transition={{ duration: 0.22 }}
-      onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
-        setIsHovered(false);
         setIsMenuOpen(false);
       }}
       className="relative grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b px-2 py-3 last:border-b-0 sm:gap-3 sm:px-4"
@@ -82,7 +95,7 @@ export function TaskRow({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
+          className="size-11 min-h-11 min-w-11 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
           onClick={onComplete}
           disabled={
             isCompleting ||
@@ -99,7 +112,7 @@ export function TaskRow({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8"
+          className="size-11 min-h-11 min-w-11"
           onClick={onPause}
           disabled={disablePause || isCompleting}
           aria-label={`Pause focus timer for ${task.title}`}
@@ -111,7 +124,7 @@ export function TaskRow({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 text-primary"
+          className="size-11 min-h-11 min-w-11 text-primary"
           onClick={onPlay}
           disabled={
             disablePlay ||
@@ -129,7 +142,7 @@ export function TaskRow({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-8"
+            className="size-11 min-h-11 min-w-11"
             disabled={disableEditDelete}
             aria-label={`Actions for ${task.title}`}
             title="Task actions"
@@ -140,7 +153,7 @@ export function TaskRow({
           </Button>
           <div
             className={`absolute left-0 top-8 z-20 w-32 rounded-xl border bg-card p-1 shadow-lg ${
-              isHovered || isMenuOpen ? "block" : "hidden"
+              isMenuOpen ? "block" : "hidden"
             }`}
           >
             <button
@@ -150,17 +163,42 @@ export function TaskRow({
                 onEdit();
               }}
               disabled={disableEditDelete}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-secondary"
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-secondary"
             >
               <Pencil className="size-3.5" /> Edit
             </button>
             <button
               type="button"
-              onClick={onDelete}
+              onClick={() => {
+                setIsMenuOpen(false);
+                onDelete();
+              }}
               disabled={disableEditDelete}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-destructive hover:bg-destructive/5"
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-destructive hover:bg-destructive/5"
             >
               <Trash2 className="size-3.5" /> Delete
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsMenuOpen(false);
+                onDuplicate();
+              }}
+              disabled={disableEditDelete}
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-secondary"
+            >
+              <Copy className="size-3.5" /> Duplicate
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsMenuOpen(false);
+                onArchive();
+              }}
+              disabled={disableEditDelete}
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-secondary"
+            >
+              <Archive className="size-3.5" /> Archive
             </button>
           </div>
         </div>
@@ -207,7 +245,7 @@ export function TaskRow({
           )}
         </AnimatePresence>
       </div>
-      <span className="max-w-24 rounded-full bg-secondary px-2 py-1 text-[10px] font-semibold text-muted-foreground sm:max-w-none sm:px-2.5 sm:text-[11px]">
+      <span className="hidden max-w-24 rounded-full bg-secondary px-2 py-1 text-[10px] font-semibold text-muted-foreground sm:inline-flex sm:max-w-none sm:px-2.5 sm:text-[11px]">
         {task.status === "InProgress"
           ? "In progress"
           : task.status === "Completed"

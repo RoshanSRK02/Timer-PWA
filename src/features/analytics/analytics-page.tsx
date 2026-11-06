@@ -26,7 +26,7 @@ import {
 } from "recharts";
 import { Card } from "@/components/ui/card";
 import { readTimerSessions } from "@/services/timer-persistence";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { GUEST_USER_ID, useAuthStore } from "@/stores/use-auth-store";
 import { useTaskStore } from "@/stores/use-task-store";
 import type { Task, TimerSessionRecord } from "@/types";
 
@@ -91,7 +91,7 @@ function MetricCard({
 }
 
 export function AnalyticsPage() {
-  const userId = useAuthStore((state) => state.user?.id);
+  const userId = useAuthStore((state) => state.user?.id) ?? GUEST_USER_ID;
   const taskSheets = useTaskStore((state) => state.sheets);
   const tasks = useMemo(() => taskSheets.flatMap((sheet) => sheet.tasks), [taskSheets]);
   const taskMap = useMemo(
@@ -101,7 +101,7 @@ export function AnalyticsPage() {
   const sessionsQuery = useQuery({
     queryKey: ["timer-sessions", userId],
     queryFn: () => readTimerSessions(userId!),
-    enabled: Boolean(userId),
+    enabled: true,
   });
   const sessions = sessionsQuery.data?.sessions ?? [];
   const focusSessions = sessions.filter((session) => !session.breakSession);

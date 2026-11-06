@@ -1,21 +1,30 @@
 import { create } from "zustand";
 import { useTaskStore } from "@/stores/use-task-store";
-import type { TimerSessionRecord, TimerSnapshot } from "@/types";
+import type {
+  SuspendedFocusTimer,
+  TimerSessionRecord,
+  TimerSnapshot,
+} from "@/types";
 
 const DEFAULT_DURATION = 25 * 60;
 
 interface TimerState extends Omit<TimerSnapshot, "userId"> {
   userId: string | null;
+  displayReset: boolean;
+  resetDisplay: () => void;
   setDuration: (minutes: number) => void;
   startTask: (sheetId: string, taskId: string, minutes: number) => boolean;
   switchTask: (sheetId: string, taskId: string, minutes: number) => boolean;
   startBreak: (minutes: number, label: string) => boolean;
+  resumeFocusSession: () => void;
+  extendBreak: (minutes: number) => void;
   start: () => void;
   pause: () => void;
   resume: () => void;
   stop: (now?: number) => void;
   extend: (minutes: number) => void;
   finishEarly: (now?: number) => void;
+  completeActiveTask: (now?: number) => void;
   completeIfExpired: (now?: number) => void;
   confirmTaskCompletion: () => void;
   resolveTaskCompletion: (completed: boolean, now?: number) => void;
@@ -76,16 +85,20 @@ export function getTimerOvertimeSeconds(
 
 type TimerData = Omit<
   TimerState,
+  | "resetDisplay"
   | "setDuration"
   | "startTask"
   | "switchTask"
   | "startBreak"
+  | "resumeFocusSession"
+  | "extendBreak"
   | "start"
   | "pause"
   | "resume"
   | "stop"
   | "extend"
   | "finishEarly"
+  | "completeActiveTask"
   | "completeIfExpired"
   | "confirmTaskCompletion"
   | "resolveTaskCompletion"
@@ -101,6 +114,7 @@ function emptyTimerState(
 ): TimerData {
   return {
     userId,
+    displayReset: false,
     status: "idle",
     taskSheetId: null,
     taskId: null,
@@ -111,6 +125,8 @@ function emptyTimerState(
     sessionStartedAt: null,
     breakSession: false,
     breakLabel: null,
+    breakComplete: false,
+    suspendedFocus: null,
     updatedAt: nowIso(),
     completedSessions,
     completionConfirmed: false,
@@ -146,6 +162,7 @@ function createSessionRecord(
 
 export const useTimerStore = create<TimerState>((set, get) => ({
   ...emptyTimerState(null),
+  resetDisplay: () => set({ displayReset: true }),
   setDuration: (minutes) => {
     if (!Number.isFinite(minutes) || minutes < 1 || get().status !== "idle") {
       return;
@@ -153,6 +170,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
     set({
       durationSeconds: Math.floor(minutes * 60),
+      displayReset: false,
       accumulatedSeconds: 0,
       startedAt: null,
       sessionId: null,
@@ -177,10 +195,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         return false;
       }
       if (current.status === "paused") get().resume();
-      return (
-        current.status !== "awaiting-completion" &&
-        current.status !== "overtime"
-      );
+      if (current.status === "overtime" && !current.startedAt) get().resume();
+      return current.status !== "awaiting-completion";
     }
 
     if (!Number.isFinite(minutes) || minutes < 1) return false;
@@ -189,6 +205,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const timestamp = nowIso();
     set({
       status: "running",
+      displayReset: false,
       taskSheetId: sheetId,
       taskId,
       durationSeconds: Math.floor(minutes * 60),
@@ -213,7 +230,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       targetTask.status === "Archived" ||
       !Number.isFinite(minutes) ||
       minutes < 1 ||
-      (current.status !== "running" && current.status !== "paused") ||
+      (current.status !== "running" &&
+        current.status !== "paused" &&
+        current.status !== "overtime") ||
       current.breakSession ||
       !current.taskId ||
       !current.taskSheetId
@@ -264,7 +283,11 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   startBreak: (minutes, label) => {
     const current = get();
     if (
-      current.status !== "idle" ||
+      (current.status !== "idle" &&
+        current.status !== "running" &&
+        current.status !== "paused" &&
+        current.status !== "overtime") ||
+      current.breakSession ||
       !Number.isFinite(minutes) ||
       minutes < 1
     ) {
@@ -272,8 +295,31 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     }
 
     const timestamp = nowIso();
+    const suspendedFocus: SuspendedFocusTimer | null =
+      current.status !== "idle" && !current.breakSession
+        ? {
+            status: current.status,
+            wasRunning:
+              current.status === "running" ||
+              (current.status === "overtime" && Boolean(current.startedAt)),
+            taskSheetId: current.taskSheetId,
+            taskId: current.taskId,
+            durationSeconds: current.durationSeconds,
+            accumulatedSeconds: getElapsedSeconds(current),
+            sessionId: current.sessionId,
+            sessionStartedAt: current.sessionStartedAt,
+          }
+        : null;
+    if (suspendedFocus?.taskSheetId && suspendedFocus.taskId) {
+      useTaskStore.getState().setTaskStatus(
+        suspendedFocus.taskSheetId,
+        suspendedFocus.taskId,
+        "Paused",
+      );
+    }
     set({
       status: "running",
+      displayReset: false,
       taskSheetId: null,
       taskId: null,
       durationSeconds: Math.floor(minutes * 60),
@@ -283,10 +329,94 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       sessionStartedAt: timestamp,
       breakSession: true,
       breakLabel: label,
+      breakComplete: false,
+      suspendedFocus,
       completionConfirmed: false,
       updatedAt: timestamp,
     });
     return true;
+  },
+  resumeFocusSession: () => {
+    const current = get();
+    if (!current.breakSession || current.status === "running") return;
+    const timestamp = Date.now();
+    const endedAt = nowIso(timestamp);
+    const elapsedSeconds = getElapsedSeconds(current, timestamp);
+    const breakSession = current.breakComplete
+      ? current.lastSession
+      : createSessionRecord(
+          current,
+          elapsedSeconds,
+          endedAt,
+          "stopped",
+        );
+    const suspended = current.suspendedFocus;
+    if (!suspended) {
+      set({
+        ...emptyTimerState(
+          current.userId,
+          current.completedSessions,
+          breakSession ?? current.lastSession,
+          current.durationSeconds,
+        ),
+        updatedAt: endedAt,
+      });
+      return;
+    }
+
+    if (suspended.taskSheetId && suspended.taskId) {
+      const shouldRun =
+        suspended.status === "running" ||
+        (suspended.status === "overtime" && suspended.wasRunning);
+      useTaskStore.getState().setTaskStatus(
+        suspended.taskSheetId,
+        suspended.taskId,
+        shouldRun ? "InProgress" : "Paused",
+      );
+    }
+    const shouldRun =
+      suspended.status === "running" ||
+      (suspended.status === "overtime" && suspended.wasRunning);
+    set({
+      status: suspended.status,
+      displayReset: false,
+      taskSheetId: suspended.taskSheetId,
+      taskId: suspended.taskId,
+      durationSeconds: suspended.durationSeconds,
+      accumulatedSeconds: suspended.accumulatedSeconds,
+      startedAt: shouldRun ? endedAt : null,
+      sessionId: suspended.sessionId,
+      sessionStartedAt: suspended.sessionStartedAt,
+      breakSession: false,
+      breakLabel: null,
+      breakComplete: false,
+      suspendedFocus: null,
+      lastSession: breakSession ?? current.lastSession,
+      updatedAt: endedAt,
+    });
+  },
+  extendBreak: (minutes) => {
+    const current = get();
+    if (
+      !current.breakSession ||
+      (current.status !== "paused" && current.status !== "running") ||
+      !Number.isFinite(minutes) ||
+      minutes < 1
+    ) {
+      return;
+    }
+    const timestamp = nowIso();
+    set({
+      status: "running",
+      displayReset: false,
+      durationSeconds: Math.floor(minutes * 60),
+      accumulatedSeconds: 0,
+      startedAt: timestamp,
+      sessionId: crypto.randomUUID(),
+      sessionStartedAt: timestamp,
+      breakComplete: false,
+      updatedAt: timestamp,
+    });
   },
   start: () => {
     const current = get();
@@ -305,12 +435,15 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const timestamp = nowIso();
     set({
       status: "running",
+      displayReset: false,
       accumulatedSeconds: 0,
       startedAt: timestamp,
       sessionId: crypto.randomUUID(),
       sessionStartedAt: timestamp,
       breakSession: false,
       breakLabel: null,
+      breakComplete: false,
+      suspendedFocus: null,
       updatedAt: timestamp,
     });
   },
@@ -333,6 +466,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
   resume: () => {
     const current = get();
+    if (current.breakSession && current.breakComplete) return;
     if (
       current.status !== "paused" &&
       !(current.status === "overtime" && !current.startedAt)
@@ -346,6 +480,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     }
     set({
       status: current.status === "overtime" ? "overtime" : "running",
+      displayReset: false,
       startedAt: timestamp,
       updatedAt: timestamp,
     });
@@ -433,12 +568,11 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         "completed",
       );
       set({
-        ...emptyTimerState(
-          current.userId,
-          current.completedSessions + 1,
-          lastSession ?? current.lastSession,
-          current.durationSeconds,
-        ),
+        status: "paused",
+        accumulatedSeconds: elapsedSeconds,
+        startedAt: null,
+        breakComplete: true,
+        lastSession: lastSession ?? current.lastSession,
         updatedAt: endedAt,
       });
       return;
@@ -457,6 +591,57 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       updatedAt: endedAt,
       completedSessions: current.completedSessions + 1,
       completionConfirmed: false,
+    });
+  },
+  completeActiveTask: (now = Date.now()) => {
+    const current = get();
+    if (
+      !current.taskSheetId ||
+      !current.taskId ||
+      !["running", "paused", "awaiting-completion", "overtime"].includes(
+        current.status,
+      )
+    ) {
+      return;
+    }
+
+    const elapsedSeconds = getElapsedSeconds(current, now);
+    const endedAt = nowIso(now);
+    const lastSession = createSessionRecord(
+      current,
+      elapsedSeconds,
+      endedAt,
+      "completed",
+    );
+    if (elapsedSeconds > 0) {
+      useTaskStore.getState().applyTimerSession(
+        current.taskSheetId,
+        current.taskId,
+        current.sessionId ?? crypto.randomUUID(),
+        elapsedSeconds / 60,
+        "Completed",
+        endedAt,
+      );
+    } else {
+      useTaskStore.getState().setTaskStatus(
+        current.taskSheetId,
+        current.taskId,
+        "Completed",
+        "manual",
+      );
+    }
+    set({
+      ...emptyTimerState(
+        current.userId,
+        current.completedSessions +
+          (current.status !== "awaiting-completion" && elapsedSeconds > 0
+            ? 1
+            : 0),
+        lastSession ?? current.lastSession,
+        current.durationSeconds,
+      ),
+      displayReset: true,
+      updatedAt: endedAt,
     });
   },
   completeIfExpired: (now = Date.now()) => {
@@ -478,12 +663,11 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         "completed",
       );
       set({
-        ...emptyTimerState(
-          current.userId,
-          current.completedSessions + 1,
-          session ?? current.lastSession,
-          current.durationSeconds,
-        ),
+        status: "paused",
+        accumulatedSeconds: current.durationSeconds,
+        startedAt: null,
+        breakComplete: true,
+        lastSession: session ?? current.lastSession,
         updatedAt: endedAt,
       });
       return;
@@ -558,6 +742,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         lastSession ?? current.lastSession,
         current.durationSeconds,
       ),
+      displayReset: completed,
       updatedAt: endedAt,
     });
   },
@@ -579,11 +764,14 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     > & { userId: string } = {
       ...snapshot,
       userId,
+      displayReset: snapshot.displayReset ?? false,
       completionConfirmed: snapshot.completionConfirmed ?? false,
       sessionId: snapshot.sessionId ?? null,
       sessionStartedAt: snapshot.sessionStartedAt ?? snapshot.startedAt,
       breakSession: snapshot.breakSession ?? false,
       breakLabel: snapshot.breakLabel ?? null,
+      breakComplete: snapshot.breakComplete ?? false,
+      suspendedFocus: snapshot.suspendedFocus ?? null,
       lastSession: snapshot.lastSession
         ? {
             ...snapshot.lastSession,
@@ -615,6 +803,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
     return {
       userId: current.userId,
+      displayReset: current.displayReset,
       status: current.status,
       taskSheetId: current.taskSheetId,
       taskId: current.taskId,
@@ -632,6 +821,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       sessionStartedAt: current.sessionStartedAt,
       breakSession: current.breakSession,
       breakLabel: current.breakLabel,
+      breakComplete: current.breakComplete,
+      suspendedFocus: current.suspendedFocus,
       lastSession: current.lastSession,
     };
   },

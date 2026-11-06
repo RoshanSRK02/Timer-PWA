@@ -1,5 +1,5 @@
 import Dexie, { type Table } from "dexie";
-import type { TaskSheet } from "@/types";
+import type { TaskSheet, TimerSnapshot } from "@/types";
 
 export interface OfflineWorkspace {
   userId: string;
@@ -26,11 +26,20 @@ export interface ActiveWorkspaceOwner {
   userId: string;
 }
 
+export interface GuestMigrationRecord {
+  userId: string;
+  completed: boolean;
+  sessionCopies: Record<string, string>;
+  guestTimerSnapshot?: TimerSnapshot;
+  updatedAt: string;
+}
+
 class OfflineDatabase extends Dexie {
   workspaces!: Table<OfflineWorkspace, string>;
   syncQueue!: Table<WorkspaceSyncQueueEntry, string>;
   syncMetadata!: Table<WorkspaceSyncMetadata, string>;
   workspaceOwners!: Table<ActiveWorkspaceOwner, string>;
+  guestMigrations!: Table<GuestMigrationRecord, string>;
 
   constructor() {
     super("tempo-offline");
@@ -39,6 +48,13 @@ class OfflineDatabase extends Dexie {
       syncQueue: "userId",
       syncMetadata: "userId",
       workspaceOwners: "id",
+    });
+    this.version(2).stores({
+      workspaces: "userId",
+      syncQueue: "userId",
+      syncMetadata: "userId",
+      workspaceOwners: "id",
+      guestMigrations: "userId",
     });
   }
 }

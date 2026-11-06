@@ -8,7 +8,7 @@ import {
   readTimerSessions,
   updateTimerSessionNotes,
 } from "@/services/timer-persistence";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { GUEST_USER_ID, useAuthStore } from "@/stores/use-auth-store";
 import { useTaskStore } from "@/stores/use-task-store";
 import type { TimerSessionRecord } from "@/types";
 
@@ -53,7 +53,7 @@ function sessionStatus(session: TimerSessionRecord): string {
 }
 
 export function SessionHistoryPage() {
-  const userId = useAuthStore((state) => state.user?.id);
+  const userId = useAuthStore((state) => state.user?.id) ?? GUEST_USER_ID;
   const taskSheets = useTaskStore((state) => state.sheets);
   const queryClient = useQueryClient();
   const [fromDate, setFromDate] = useState("");
@@ -65,7 +65,7 @@ export function SessionHistoryPage() {
   const sessionsQuery = useQuery({
     queryKey: ["timer-sessions", userId],
     queryFn: () => readTimerSessions(userId!),
-    enabled: Boolean(userId),
+    enabled: true,
   });
   const saveNotesMutation = useMutation({
     mutationFn: ({

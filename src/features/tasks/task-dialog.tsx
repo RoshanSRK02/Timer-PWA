@@ -15,16 +15,19 @@ const taskStatuses: TaskStatus[] = [
 export type TaskFormValues = Pick<
   Task,
   "title" | "estimatedMinutes" | "status"
->;
+> &
+  Pick<Task, "description">;
 
 interface TaskDialogProps {
   task: Task | null;
   onClose: () => void;
   onSave: (values: TaskFormValues) => void;
+  onDelete?: () => void;
 }
 
-export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
+export function TaskDialog({ task, onClose, onSave, onDelete }: TaskDialogProps) {
   const [title, setTitle] = useState(task?.title ?? "");
+  const [description, setDescription] = useState(task?.description ?? "");
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     String(task?.estimatedMinutes ?? 25),
   );
@@ -43,6 +46,7 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
     event.preventDefault();
     onSave({
       title: title.trim(),
+      description: description.trim(),
       estimatedMinutes: Number(estimatedMinutes),
       status,
     });
@@ -71,7 +75,7 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <div className="space-y-2">
             <label htmlFor="task-title" className="text-sm font-medium">
-              Title
+              Task name
             </label>
             <Input
               id="task-title"
@@ -81,6 +85,19 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
               required
               value={title}
               onChange={(event) => setTitle(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="task-description" className="text-sm font-medium">
+              Description
+            </label>
+            <textarea
+              id="task-description"
+              rows={3}
+              maxLength={1000}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className="flex w-full rounded-xl border border-input bg-background px-3.5 py-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
           <div className="space-y-2">
@@ -122,11 +139,23 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
               ))}
             </select>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-between gap-2 pt-2">
+            {task && onDelete ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                onClick={onDelete}
+              >
+                Delete task
+              </Button>
+            ) : <span />}
+            <div className="ml-auto flex gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit">{task ? "Save changes" : "Add task"}</Button>
+            </div>
           </div>
         </form>
       </section>

@@ -14,16 +14,14 @@ export function useAuth() {
   const initializationError = useAuthStore(
     (state) => state.initializationError,
   );
-  const setUser = useAuthStore((state) => state.setUser);
 
   async function signInWithPassword(email: string, password: string) {
-    const { data, error } = await getSupabaseClient().auth.signInWithPassword({
+    const { error } = await getSupabaseClient().auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) throw error;
-    setUser(data.user);
   }
 
   async function signUp(email: string, password: string) {
@@ -34,9 +32,8 @@ export function useAuth() {
         emailRedirectTo: getAppUrl(),
       },
     });
-
     if (error) throw error;
-    if (data.user && data.session) setUser(data.user);
+    if (error) throw error;
 
     return { requiresEmailConfirmation: !data.session };
   }
@@ -53,12 +50,11 @@ export function useAuth() {
   }
 
   async function updatePassword(password: string) {
-    const { data, error } = await getSupabaseClient().auth.updateUser({
+    const { error } = await getSupabaseClient().auth.updateUser({
       password,
     });
-
     if (error) throw error;
-    setUser(data.user);
+    if (error) throw error;
   }
 
   async function signInWithOAuth(provider: Provider, returnPath = "/") {
@@ -80,7 +76,6 @@ export function useAuth() {
   async function signOut() {
     const { error } = await getSupabaseClient().auth.signOut();
     if (error) throw error;
-    setUser(null);
   }
 
   return {
