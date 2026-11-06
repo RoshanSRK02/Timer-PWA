@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { BreakDrawer } from "@/features/dashboard/break-drawer";
+import { BreakDurationDialog } from "@/features/dashboard/break-duration-dialog";
 import { FlipClock } from "@/features/dashboard/flip-clock";
 import { TimerSettings } from "@/features/dashboard/timer-settings";
 import { useTimerPersistence } from "@/hooks/use-timer-persistence";
@@ -411,8 +411,8 @@ export function DashboardPage() {
         </motion.section>
       </motion.div>
     ) : null;
-  const breakDrawer = (
-    <BreakDrawer
+  const breakDialog = (
+    <BreakDurationDialog
       open={breakDrawerOpen}
       onClose={() => setBreakDrawerOpen(false)}
       disabled={timer.breakSession || status === "awaiting-completion" || isTimerLoading}
@@ -877,8 +877,8 @@ export function DashboardPage() {
       </div>
 
       {isFullscreen && timerStageRef.current
-        ? createPortal(breakDrawer, timerStageRef.current)
-        : breakDrawer}
+        ? createPortal(breakDialog, timerStageRef.current)
+        : breakDialog}
 
       {isFullscreen && timerStageRef.current
         ? createPortal(nextTaskPromptView, timerStageRef.current)
