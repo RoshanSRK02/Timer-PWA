@@ -6,7 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { PictureInPicture2 } from "lucide-react";
+import { Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   getTimerOvertimeSeconds,
@@ -32,6 +32,11 @@ function formatTime(seconds: number): string {
     .join(":");
 }
 
+function formatOvertime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  return `+${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 function PopOutTimerWindow({
   onReturn,
 }: {
@@ -52,7 +57,7 @@ function PopOutTimerWindow({
   const overtimeSeconds = getTimerOvertimeSeconds(timer, now);
   const displayTime =
     timer.status === "overtime"
-      ? `+${formatTime(overtimeSeconds)}`
+      ? formatOvertime(overtimeSeconds)
       : formatTime(getTimerRemainingSeconds(timer, now));
 
   useEffect(() => {
@@ -102,6 +107,20 @@ function PopOutTimerWindow({
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
+      {timer.status === "overtime" && (
+        <p
+          style={{
+            margin: "16px 0 -12px",
+            color: "#fbbf24",
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: ".15em",
+            textAlign: "center",
+          }}
+        >
+          OVERTIME
+        </p>
+      )}
       <p
         style={{
           margin: "0 0 8px",
@@ -180,10 +199,26 @@ function copyStyles(from: Document, to: Document): void {
 export function PopOutTimerButton() {
   const timerStatus = useTimerStore((state) => state.status);
   const taskId = useTimerStore((state) => state.taskId);
+  const taskSheetId = useTimerStore((state) => state.taskSheetId);
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
   const rootRef = useRef<Root | null>(null);
+  const activeTimer =
+    timerStatus === "running" ||
+    timerStatus === "paused" ||
+    timerStatus === "overtime";
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.info(
+        `[Tempo] Document Picture-in-Picture supported: ${Boolean(
+          (window as WindowWithDocumentPictureInPicture)
+            .documentPictureInPicture,
+        )}`,
+      );
+    }
+  }, []);
 
   const closePopup = useCallback(() => {
     rootRef.current?.unmount();
@@ -195,9 +230,9 @@ export function PopOutTimerButton() {
   }, []);
 
   useEffect(() => {
-    if (!isOpen || (timerStatus !== "idle" && taskId)) return;
+    if (!isOpen || (activeTimer && taskId && taskSheetId)) return;
     closePopup();
-  }, [closePopup, isOpen, taskId, timerStatus]);
+  }, [activeTimer, closePopup, isOpen, taskId, taskSheetId]);
 
   useEffect(
     () => () => {
@@ -211,67 +246,91 @@ export function PopOutTimerButton() {
     [],
   );
 
+  function mountPopup(popup: Window, fallback: boolean) {
+    popupRef.current = popup;
+    popup.document.title = "Tempo — Pop Out Timer";
+    popup.document.documentElement.className =
+      document.documentElement.className;
+    popup.document.body.style.cssText =
+      "margin:0;min-width:280px;background:#111318";
+    copyStyles(document, popup.document);
+    popup.document.body.replaceChildren();
+    const container = popup.document.createElement("div");
+    popup.document.body.append(container);
+    const root = createRoot(container);
+    rootRef.current = root;
+    root.render(
+      <PopOutTimerWindow
+        onReturn={() => {
+          closePopup();
+          window.focus();
+          document
+            .getElementById("timer-stage")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }}
+      />,
+    );
+    popup.addEventListener(
+      "pagehide",
+      () => {
+        if (rootRef.current === root) root.unmount();
+        if (rootRef.current === root) rootRef.current = null;
+        if (popupRef.current === popup) popupRef.current = null;
+        setIsOpen(false);
+      },
+      { once: true },
+    );
+    setIsOpen(true);
+    if (import.meta.env.DEV) {
+      console.info(
+        fallback
+          ? "[Tempo] Pop-out opened using fallback popup."
+          : "[Tempo] Pop-out opened using Document Picture-in-Picture.",
+      );
+    }
+  }
+
+  function openFallback(): boolean {
+    const fallback = window.open(
+      "",
+      "tempo-pop-out-timer",
+      "popup=yes,width=360,height=250,resizable=yes",
+    );
+    if (!fallback) return false;
+    mountPopup(fallback, true);
+    return true;
+  }
+
   async function openPopup() {
     setError(null);
     const pictureInPicture = (
       window as WindowWithDocumentPictureInPicture
     ).documentPictureInPicture;
-    if (!pictureInPicture) {
-      setError(
-        "Picture-in-Picture is not supported in this browser. Keep the timer open in the app.",
-      );
-      return;
+    if (pictureInPicture) {
+      try {
+        const popup = await pictureInPicture.requestWindow({
+          width: 360,
+          height: 250,
+        });
+        mountPopup(popup, false);
+        return;
+      } catch (openError) {
+        if (import.meta.env.DEV) {
+          console.info("[Tempo] Picture-in-Picture failed; trying popup fallback.", openError);
+        }
+        if (openFallback()) return;
+        setError(
+          "Picture-in-Picture could not open and the browser blocked the fallback popup.",
+        );
+        return;
+      }
     }
 
-    try {
-      const popup = await pictureInPicture.requestWindow({
-        width: 360,
-        height: 220,
-      });
-      popupRef.current = popup;
-      popup.document.title = "Tempo — Pop Out Timer";
-      popup.document.documentElement.className =
-        document.documentElement.className;
-      popup.document.body.style.cssText =
-        "margin:0;min-width:280px;background:#111318";
-      copyStyles(document, popup.document);
-      popup.document.body.replaceChildren();
-      const container = popup.document.createElement("div");
-      popup.document.body.append(container);
-      const root = createRoot(container);
-      rootRef.current = root;
-      root.render(
-        <PopOutTimerWindow
-          onReturn={() => {
-            closePopup();
-            window.focus();
-            document
-              .getElementById("timer-stage")
-              ?.scrollIntoView({ behavior: "smooth", block: "center" });
-          }}
-        />,
-      );
-      popup.addEventListener(
-        "pagehide",
-        () => {
-          if (rootRef.current) rootRef.current.unmount();
-          rootRef.current = null;
-          popupRef.current = null;
-          setIsOpen(false);
-        },
-        { once: true },
-      );
-      setIsOpen(true);
-    } catch (openError) {
-      setError(
-        openError instanceof Error
-          ? `Could not open the pop-out timer: ${openError.message}`
-          : "Could not open the pop-out timer.",
-      );
-    }
+    if (openFallback()) return;
+    setError("The browser blocked the pop-out timer window.");
   }
 
-  if (!taskId || timerStatus === "idle") return null;
+  if (!taskId || !taskSheetId || !activeTimer) return null;
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -281,13 +340,9 @@ export function PopOutTimerButton() {
         size="sm"
         onClick={() => (isOpen ? closePopup() : void openPopup())}
         aria-label={isOpen ? "Close pop-out timer" : "Pop out timer"}
-        title={
-          "documentPictureInPicture" in window
-            ? undefined
-            : "Picture-in-Picture is unsupported in this browser"
-        }
+        title="Keep the timer visible while working in other tabs or applications"
       >
-        <PictureInPicture2 className="size-4" />
+        <Pin className="size-4" />
         {isOpen ? "Close Pop Out" : "Pop Out Timer"}
       </Button>
       {error && (
