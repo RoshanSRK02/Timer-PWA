@@ -1,4 +1,4 @@
-import { Check, Monitor, Moon, Sun } from "lucide-react";
+import { Check, Monitor, Moon, MoonStar, Sun } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import type { ThemePreference } from "@/types";
 import { cn } from "@/utils/cn";
@@ -10,6 +10,7 @@ const options: {
 }[] = [
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
+  { value: "oled", label: "OLED", icon: MoonStar },
   { value: "system", label: "System", icon: Monitor },
 ];
 

@@ -9,16 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { Task, TaskStatus } from "@/types";
-
-const statusStyles: Record<TaskStatus, string> = {
-  Pending: "bg-secondary text-secondary-foreground",
-  InProgress: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-  Paused: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-  Completed: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  Skipped: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  Archived: "bg-muted text-muted-foreground",
-};
+import type { Task } from "@/types";
 
 interface TaskRowProps {
   task: Task;
@@ -51,6 +42,8 @@ export function TaskRow({
 }: TaskRowProps) {
   const [isCompleting, setIsCompleting] = useState(false);
   const [showCheck, setShowCheck] = useState(task.status === "Completed");
+  const [isHovered, setIsHovered] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
     if (completionRequested) setIsCompleting(true);
@@ -62,95 +55,29 @@ export function TaskRow({
     if (onCompletionAnimationComplete) onCompletionAnimationComplete();
     else onComplete();
   };
+  const actualTime =
+    task.actualMinutes === null
+      ? "—"
+      : `${Number.isInteger(task.actualMinutes) ? task.actualMinutes : task.actualMinutes.toFixed(1)}m`;
 
   return (
     <motion.div
       layout
       initial={{ opacity: 0, y: 7 }}
-      animate={{ opacity: isCompleting ? 0.48 : 1, y: 0 }}
+      animate={{
+        opacity: task.status === "Completed" || isCompleting ? 0.58 : 1,
+        y: 0,
+      }}
       exit={{ opacity: 0, height: 0, marginTop: 0, overflow: "hidden" }}
       transition={{ duration: 0.22 }}
-      className="relative grid min-w-[760px] grid-cols-[minmax(210px,1fr)_86px_86px_112px_40px_40px_88px] items-center gap-2 border-b px-4 py-3 last:border-b-0 sm:gap-3 sm:px-5"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setIsMenuOpen(false);
+      }}
+      className="relative grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b px-2 py-3 last:border-b-0 sm:gap-3 sm:px-4"
     >
-      <div className="relative min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={onEdit}
-            disabled={disableEditDelete}
-            className="block max-w-full truncate text-left text-sm font-medium hover:text-primary"
-            title={task.title}
-          >
-            {task.title}
-          </button>
-          {showCheck && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
-              aria-label="Completed"
-            >
-              <Check className="size-3" />
-            </motion.span>
-          )}
-        </div>
-        <AnimatePresence>
-          {isCompleting && (
-            <motion.span
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: 1 }}
-              transition={{ duration: 0.42, ease: "easeInOut" }}
-              onAnimationComplete={completeAnimation}
-              className="absolute left-0 top-1/2 h-px w-full origin-left bg-muted-foreground"
-              aria-hidden="true"
-            />
-          )}
-        </AnimatePresence>
-      </div>
-      <span className="text-sm tabular-nums text-muted-foreground">
-        {task.estimatedMinutes}m
-      </span>
-      <span className="text-sm tabular-nums text-muted-foreground">
-        {Number.isInteger(task.actualMinutes)
-          ? task.actualMinutes
-          : task.actualMinutes.toFixed(1)}
-        m
-      </span>
-      <span
-        className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusStyles[task.status]}`}
-      >
-        {task.status === "InProgress" ? "In progress" : task.status}
-      </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-9 text-amber-600 hover:text-amber-700 dark:text-amber-400"
-        onClick={onPause}
-        disabled={disablePause || isCompleting}
-        aria-label={`Pause focus timer for ${task.title}`}
-        title="Pause task timer"
-      >
-        <Pause className="size-4 fill-current" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-9 text-primary"
-        onClick={onPlay}
-        disabled={
-          disablePlay ||
-          isCompleting ||
-          task.status === "Completed" ||
-          task.status === "Archived"
-        }
-        aria-label={`${task.status === "Paused" ? "Resume" : "Start"} focus timer for ${task.title}`}
-        title={task.status === "Paused" ? "Resume task timer" : "Start task timer"}
-      >
-        <Play className="size-4 fill-current" />
-      </Button>
-      <div className="flex items-center justify-end gap-0.5">
+      <div className="flex items-center gap-0.5">
         <Button
           type="button"
           variant="ghost"
@@ -168,7 +95,36 @@ export function TaskRow({
         >
           <Check className="size-4" />
         </Button>
-        <div className="group relative">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          onClick={onPause}
+          disabled={disablePause || isCompleting}
+          aria-label={`Pause focus timer for ${task.title}`}
+          title="Pause task timer (Space)"
+        >
+          <Pause className="size-4 fill-current" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 text-primary"
+          onClick={onPlay}
+          disabled={
+            disablePlay ||
+            isCompleting ||
+            task.status === "Completed" ||
+            task.status === "Archived"
+          }
+          aria-label={`${task.status === "Paused" ? "Resume" : "Start"} focus timer for ${task.title}`}
+          title={`${task.status === "Paused" ? "Resume" : "Start"} task timer (Enter)`}
+        >
+          <Play className="size-4 fill-current" />
+        </Button>
+        <div className="relative">
           <Button
             type="button"
             variant="ghost"
@@ -177,13 +133,22 @@ export function TaskRow({
             disabled={disableEditDelete}
             aria-label={`Actions for ${task.title}`}
             title="Task actions"
+            aria-expanded={isMenuOpen}
+            onClick={() => setIsMenuOpen((open) => !open)}
           >
             <MoreHorizontal className="size-4" />
           </Button>
-          <div className="absolute right-0 top-8 z-20 hidden w-32 rounded-xl border bg-card p-1 shadow-lg group-focus-within:block group-hover:block">
+          <div
+            className={`absolute left-0 top-8 z-20 w-32 rounded-xl border bg-card p-1 shadow-lg ${
+              isHovered || isMenuOpen ? "block" : "hidden"
+            }`}
+          >
             <button
               type="button"
-              onClick={onEdit}
+              onClick={() => {
+                setIsMenuOpen(false);
+                onEdit();
+              }}
               disabled={disableEditDelete}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs hover:bg-secondary"
             >
@@ -200,6 +165,55 @@ export function TaskRow({
           </div>
         </div>
       </div>
+      <div className="relative min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onEdit}
+            disabled={disableEditDelete}
+            className={`block max-w-full truncate text-left text-sm font-medium hover:text-primary ${
+              task.status === "Completed" ? "line-through" : ""
+            }`}
+            title={task.title}
+          >
+            {task.title}
+          </button>
+          {showCheck && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+              aria-label="Completed"
+              title="Completed"
+            >
+              <Check className="size-3" />
+            </motion.span>
+          )}
+        </div>
+        <p className="mt-1 truncate text-[11px] text-muted-foreground">
+          Estimate {task.estimatedMinutes}m <span aria-hidden="true">·</span>{" "}
+          Actual {actualTime}
+        </p>
+        <AnimatePresence>
+          {isCompleting && (
+            <motion.span
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{ duration: 0.42, ease: "easeInOut" }}
+              onAnimationComplete={completeAnimation}
+              className="absolute left-0 top-1/2 h-px w-full origin-left bg-muted-foreground"
+              aria-hidden="true"
+            />
+          )}
+        </AnimatePresence>
+      </div>
+      <span className="max-w-24 rounded-full bg-secondary px-2 py-1 text-[10px] font-semibold text-muted-foreground sm:max-w-none sm:px-2.5 sm:text-[11px]">
+        {task.status === "InProgress"
+          ? "In progress"
+          : task.status === "Completed"
+            ? "Completed"
+            : task.status}
+      </span>
     </motion.div>
   );
 }

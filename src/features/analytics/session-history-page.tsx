@@ -235,9 +235,15 @@ export function SessionHistoryPage() {
                   <span className="text-[10px] font-medium uppercase text-muted-foreground xl:hidden">End</span>
                   <p className="text-xs">{formatDateTime(session.endedAt)}</p>
                 </div>
-                <div className="flex items-center gap-1 text-xs">
-                  <Clock3 className="size-3.5 text-muted-foreground" />
-                  {formatDuration(session.actualSeconds)}
+                <div className="text-xs">
+                  <p className="flex items-center gap-1">
+                    <Clock3 className="size-3.5 text-muted-foreground" />
+                    Actual {formatDuration(session.actualSeconds)}
+                  </p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    Estimate {formatDuration(session.durationSeconds)} · Overtime{" "}
+                    {formatDuration(session.overtimeSeconds)}
+                  </p>
                 </div>
                 <span className="w-fit rounded-full bg-secondary px-2.5 py-1 text-xs font-medium">{sessionStatus(session)}</span>
                 <div className="min-w-0">

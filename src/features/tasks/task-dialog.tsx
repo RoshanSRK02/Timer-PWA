@@ -14,7 +14,7 @@ const taskStatuses: TaskStatus[] = [
 
 export type TaskFormValues = Pick<
   Task,
-  "title" | "estimatedMinutes" | "actualMinutes" | "status"
+  "title" | "estimatedMinutes" | "status"
 >;
 
 interface TaskDialogProps {
@@ -27,9 +27,6 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     String(task?.estimatedMinutes ?? 25),
-  );
-  const [actualMinutes, setActualMinutes] = useState(
-    String(task?.actualMinutes ?? 0),
   );
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? "Pending");
 
@@ -47,7 +44,6 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
     onSave({
       title: title.trim(),
       estimatedMinutes: Number(estimatedMinutes),
-      actualMinutes: Number(actualMinutes),
       status,
     });
   }
@@ -87,38 +83,26 @@ export function TaskDialog({ task, onClose, onSave }: TaskDialogProps) {
               onChange={(event) => setTitle(event.target.value)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <label htmlFor="task-estimate" className="text-sm font-medium">
-                Estimate (min)
-              </label>
-              <Input
-                id="task-estimate"
-                type="number"
-                min={1}
-                max={1440}
-                step={1}
-                required
-                value={estimatedMinutes}
-                onChange={(event) => setEstimatedMinutes(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="task-actual" className="text-sm font-medium">
-                Actual (min)
-              </label>
-              <Input
-                id="task-actual"
-                type="number"
-                min={0}
-                max={100000}
-                step={0.1}
-                required
-                value={actualMinutes}
-                onChange={(event) => setActualMinutes(event.target.value)}
-              />
-            </div>
+          <div className="space-y-2">
+            <label htmlFor="task-estimate" className="text-sm font-medium">
+              Estimate (min)
+            </label>
+            <Input
+              id="task-estimate"
+              type="number"
+              min={1}
+              max={1440}
+              step={1}
+              required
+              value={estimatedMinutes}
+              onChange={(event) => setEstimatedMinutes(event.target.value)}
+            />
           </div>
+          {task && (
+            <p className="text-xs text-muted-foreground">
+              Actual time is tracked automatically from timer sessions.
+            </p>
+          )}
           <div className="space-y-2">
             <label htmlFor="task-status" className="text-sm font-medium">
               Status

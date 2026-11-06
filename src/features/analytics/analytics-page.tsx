@@ -28,7 +28,7 @@ import { Card } from "@/components/ui/card";
 import { readTimerSessions } from "@/services/timer-persistence";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useTaskStore } from "@/stores/use-task-store";
-import type { TimerSessionRecord } from "@/types";
+import type { Task, TimerSessionRecord } from "@/types";
 
 function dayStart(date: Date): Date {
   const result = new Date(date);
@@ -119,7 +119,10 @@ export function AnalyticsPage() {
     return completedAt >= today.getTime() && completedAt < tomorrow.getTime();
   }).length;
   const tasksWithActuals = completedTasks.filter(
-    (task) => task.actualMinutes > 0 && task.estimatedMinutes > 0,
+    (task): task is Task & { actualMinutes: number } =>
+      task.actualMinutes !== null &&
+      task.actualMinutes > 0 &&
+      task.estimatedMinutes > 0,
   );
   const estimationAccuracy = tasksWithActuals.length
     ? (tasksWithActuals.reduce(

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
-  ChevronDown,
   ClipboardList,
   FilePlus2,
   Pencil,
@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { useTimerPersistence } from "@/hooks/use-timer-persistence";
 import { useTaskStore } from "@/stores/use-task-store";
 import { useTimerStore } from "@/stores/use-timer-store";
+import { useAuthStore } from "@/stores/use-auth-store";
+import { readTimerSessions } from "@/services/timer-persistence";
 import type { Task } from "@/types";
 import { SheetDialog } from "@/features/tasks/sheet-dialog";
 import { TaskDialog, type TaskFormValues } from "@/features/tasks/task-dialog";
@@ -35,6 +37,7 @@ interface PendingTaskSwitch {
 }
 
 export function TaskManager() {
+  const userId = useAuthStore((state) => state.user?.id);
   const { isLoading: isTimerLoading } = useTimerPersistence();
   const sheets = useTaskStore((state) => state.sheets);
   const activeSheetId = useTaskStore((state) => state.activeSheetId);
@@ -61,6 +64,9 @@ export function TaskManager() {
     (state) => state.resolveTaskCompletion,
   );
   const [query, setQuery] = useState("");
+  const [taskFilter, setTaskFilter] = useState<"All" | "Active" | "Completed">(
+    "All",
+  );
   const [sheetDialog, setSheetDialog] = useState<SheetDialogMode | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -73,26 +79,67 @@ export function TaskManager() {
   const [manualCompletionAnimationTaskId, setManualCompletionAnimationTaskId] =
     useState<string | null>(null);
   const [taskActionError, setTaskActionError] = useState<string | null>(null);
+  const sessionsQuery = useQuery({
+    queryKey: ["timer-sessions", userId],
+    queryFn: () => readTimerSessions(userId!),
+    enabled: Boolean(userId),
+  });
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleTasks = useMemo(
-    () =>
-      (activeSheet?.tasks ?? []).filter((task) =>
+  const visibleTasks = useMemo(() => {
+    const tasks = (activeSheet?.tasks ?? [])
+      .filter((task) =>
         task.title.toLocaleLowerCase().includes(normalizedQuery),
-      ),
-    [activeSheet?.tasks, normalizedQuery],
-  );
-  const activeTasks = visibleTasks.filter(
-    (task) => task.status !== "Completed",
-  );
-  const completedTasks = visibleTasks.filter(
-    (task) => task.status === "Completed",
-  );
+      )
+      .filter((task) =>
+        taskFilter === "All"
+          ? true
+          : taskFilter === "Completed"
+            ? task.status === "Completed"
+            : task.status !== "Completed",
+      );
+    return tasks.sort((first, second) =>
+      Number(first.status === "Completed") -
+      Number(second.status === "Completed"),
+    );
+  }, [activeSheet?.tasks, normalizedQuery, taskFilter]);
   const editingPendingCompletion = pendingCompletion?.taskId;
   const isTimerTask = (task: Task) =>
     timerTaskId === task.id && timerTaskSheetId === activeSheet?.id;
   const activeSheetHasTimerTask =
     timerStatus !== "idle" && timerTaskSheetId === activeSheet?.id;
+  const todaySummary = useMemo(() => {
+    const now = new Date();
+    const sessions = (sessionsQuery.data?.sessions ?? []).filter(
+      (session) => new Date(session.startedAt).toDateString() === now.toDateString(),
+    );
+    const focusSeconds = sessions
+      .filter((session) => !session.breakSession)
+      .reduce((total, session) => total + session.actualSeconds, 0);
+    const breakSeconds = sessions
+      .filter((session) => session.breakSession)
+      .reduce((total, session) => total + session.actualSeconds, 0);
+    const taskIds = new Set(
+      sessions
+        .filter((session) => !session.breakSession && session.taskId)
+        .map((session) => session.taskId!),
+    );
+    for (const task of sheets.flatMap((sheet) => sheet.tasks)) {
+      if (task.completedAt && new Date(task.completedAt).toDateString() === now.toDateString()) {
+        taskIds.add(task.id);
+      }
+    }
+    const format = (seconds: number) => {
+      const minutes = Math.round(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+    };
+    return {
+      focus: format(focusSeconds),
+      breaks: format(breakSeconds),
+      tasks: taskIds.size,
+    };
+  }, [sessionsQuery.data?.sessions, sheets]);
 
   useEffect(() => {
     if (
@@ -103,13 +150,13 @@ export function TaskManager() {
       return;
     }
 
-    const taskIsVisible =
+    const timerTaskExists =
       activeSheet?.id === timerTaskSheetId &&
-      activeTasks.some((task) => task.id === timerTaskId);
-    if (!taskIsVisible) resolveTaskCompletion(true);
+      activeSheet.tasks.some((task) => task.id === timerTaskId);
+    if (!timerTaskExists) resolveTaskCompletion(true);
   }, [
     activeSheet?.id,
-    activeTasks,
+    activeSheet?.tasks,
     resolveTaskCompletion,
     timerCompletionConfirmed,
     timerTaskId,
@@ -155,9 +202,7 @@ export function TaskManager() {
       !activeSheet ||
       !values.title.trim() ||
       !Number.isFinite(values.estimatedMinutes) ||
-      values.estimatedMinutes < 1 ||
-      !Number.isFinite(values.actualMinutes) ||
-      values.actualMinutes < 0
+      values.estimatedMinutes < 1
     ) {
       return;
     }
@@ -218,12 +263,6 @@ export function TaskManager() {
       );
     }
     setCompletionConfirmationTask(null);
-  }
-
-  function finishManualCompletionAnimation(taskId: string) {
-    setManualCompletionAnimationTaskId((current) =>
-      current === taskId ? null : current,
-    );
   }
 
   function confirmSheetDialog(name?: string) {
@@ -330,6 +369,23 @@ export function TaskManager() {
         </Button>
       </div>
 
+      <p className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs text-muted-foreground sm:text-sm" aria-label="Today summary">
+        <span className="shrink-0 font-semibold text-foreground">Today</span>
+        <span className="truncate">{todaySummary.focus} • {todaySummary.tasks} Tasks • {todaySummary.breaks} Breaks</span>
+      </p>
+      {sessionsQuery.error && (
+        <p className="text-xs text-destructive" role="alert">
+          Today’s timer summary could not be loaded: {sessionsQuery.error instanceof Error
+            ? sessionsQuery.error.message
+            : "Unable to read timer sessions."}
+        </p>
+      )}
+      {sessionsQuery.data?.syncWarning && (
+        <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
+          Today’s summary may be incomplete: {sessionsQuery.data.syncWarning}
+        </p>
+      )}
+
       <Card className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex min-w-0 items-center gap-2">
@@ -395,20 +451,28 @@ export function TaskManager() {
               className="h-10 pl-9"
             />
           </div>
+          <div className="flex shrink-0 rounded-xl bg-secondary p-1" role="group" aria-label="Filter tasks">
+            {(["All", "Active", "Completed"] as const).map((filter) => (
+              <button
+                type="button"
+                key={filter}
+                aria-pressed={taskFilter === filter}
+                onClick={() => setTaskFilter(filter)}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  taskFilter === filter
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <div className="grid min-w-[760px] grid-cols-[minmax(210px,1fr)_86px_86px_112px_40px_40px_88px] gap-2 border-b bg-secondary/40 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground sm:gap-3 sm:px-5">
-            <span>Task</span>
-            <span>Estimate</span>
-            <span>Actual</span>
-            <span>Status</span>
-            <span className="sr-only">Pause</span>
-            <span className="sr-only">Start or resume</span>
-            <span className="text-right">Actions</span>
-          </div>
+        <div>
           <AnimatePresence mode="popLayout" initial={false}>
-            {activeTasks.map((task) => (
+            {visibleTasks.map((task) => (
               <TaskRow
                 key={task.id}
                 task={task}
@@ -444,7 +508,7 @@ export function TaskManager() {
               />
             ))}
           </AnimatePresence>
-          {activeTasks.length === 0 && (
+          {visibleTasks.length === 0 && (
             <div className="flex flex-col items-center px-5 py-10 text-center">
               <span className="mb-3 flex size-11 items-center justify-center rounded-2xl bg-accent text-primary">
                 <ClipboardList className="size-5" />
@@ -478,62 +542,6 @@ export function TaskManager() {
           </p>
         )}
 
-        <details className="group border-t">
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-4 text-sm font-semibold hover:bg-secondary/40 sm:px-5 [&::-webkit-details-marker]:hidden">
-            <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-            <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
-            Completed tasks
-            <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-              {completedTasks.length}
-            </span>
-          </summary>
-          <div className="border-t bg-background/50">
-            {completedTasks.length > 0 ? (
-              <div className="overflow-x-auto">
-                <div className="min-w-[760px]">
-                  {completedTasks.map((task) => (
-                    <motion.div
-                      key={task.id}
-                      layout
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                    >
-                      <TaskRow
-                        task={task}
-                        completionRequested={
-                          manualCompletionAnimationTaskId === task.id
-                        }
-                        onEdit={() => openEditTask(task)}
-                        onDelete={() =>
-                          activeSheet && deleteTask(activeSheet.id, task.id)
-                        }
-                        onPlay={() => startTaskTimer(task)}
-                        onPause={pauseTimer}
-                        onComplete={() => setCompletionConfirmationTask(task)}
-                        onCompletionAnimationComplete={() =>
-                          finishManualCompletionAnimation(task.id)
-                        }
-                        disablePlay={isTimerLoading}
-                        disablePause={
-                          !isTimerTask(task) ||
-                          timerStatus !== "running" ||
-                          timerIsBreak
-                        }
-                      />
-                    </motion.div>
-                  ))}
-                </div>
-
-              </div>
-            ) : (
-              <p className="px-5 py-5 text-sm text-muted-foreground">
-                {normalizedQuery
-                  ? "No completed tasks match your search."
-                  : "Tasks you complete will appear here."}
-              </p>
-            )}
-          </div>
-        </details>
       </Card>
 
       <AnimatePresence>

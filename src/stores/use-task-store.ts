@@ -17,14 +17,14 @@ interface TaskState {
   setActiveSheet: (sheetId: string) => void;
   addTask: (
     sheetId: string,
-    task: Pick<Task, "title" | "estimatedMinutes" | "actualMinutes" | "status">,
+    task: Pick<Task, "title" | "estimatedMinutes" | "status">,
   ) => void;
   updateTask: (
     sheetId: string,
     taskId: string,
     updates: Pick<
       Task,
-      "title" | "estimatedMinutes" | "actualMinutes" | "status"
+      "title" | "estimatedMinutes" | "status"
     >,
   ) => void;
   deleteTask: (sheetId: string, taskId: string) => void;
@@ -40,6 +40,7 @@ interface TaskState {
     sessionId: string,
     minutes: number,
     status: TaskStatus,
+    updatedAt: string,
   ) => void;
 }
 
@@ -53,6 +54,7 @@ function createSheetData(name: string): TaskSheet {
     name,
     tasks: [],
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -85,6 +87,7 @@ export const useTaskStore = create<TaskState>()(
           sheets: updateSheet(state.sheets, sheetId, (sheet) => ({
             ...sheet,
             name: name.trim(),
+            updatedAt: new Date().toISOString(),
           })),
         })),
       deleteSheet: (sheetId) =>
@@ -110,11 +113,13 @@ export const useTaskStore = create<TaskState>()(
           return {
             sheets: state.sheets.map((sheet) => ({
               ...sheet,
+              ...(sheet.id === sheetId ? { updatedAt: timestamp } : {}),
               tasks: [
                 ...(sheet.id === sheetId
                   ? [
                       {
                         ...task,
+                        actualMinutes: null,
                         id: createId(),
                         createdAt: timestamp,
                         updatedAt: timestamp,
@@ -128,7 +133,11 @@ export const useTaskStore = create<TaskState>()(
                 ...sheet.tasks.map((existingTask) =>
                   task.status === "InProgress" &&
                   existingTask.status === "InProgress"
-                    ? { ...existingTask, status: "Paused" as const }
+                    ? {
+                        ...existingTask,
+                        status: "Paused" as const,
+                        updatedAt: timestamp,
+                      }
                     : existingTask,
                 ),
               ],
@@ -141,18 +150,24 @@ export const useTaskStore = create<TaskState>()(
           return {
             sheets: state.sheets.map((sheet) => ({
               ...sheet,
+              ...(sheet.id === sheetId ? { updatedAt: timestamp } : {}),
               tasks: sheet.tasks.map((task) => {
                 const isTarget = sheet.id === sheetId && task.id === taskId;
                 if (!isTarget) {
                   return updates.status === "InProgress" &&
                     task.status === "InProgress"
-                    ? { ...task, status: "Paused" as const }
+                    ? { ...task, status: "Paused" as const, updatedAt: timestamp }
                     : task;
                 }
 
                 return {
                   ...task,
                   ...updates,
+                  actualMinutes:
+                    updates.status === "Completed" &&
+                    task.status !== "Completed"
+                      ? null
+                      : task.actualMinutes,
                   updatedAt: timestamp,
                   completedAt:
                     updates.status === "Completed"
@@ -172,23 +187,33 @@ export const useTaskStore = create<TaskState>()(
           };
         }),
       deleteTask: (sheetId, taskId) =>
-        set((state) => ({
-          sheets: updateSheet(state.sheets, sheetId, (sheet) => ({
-            ...sheet,
-            tasks: sheet.tasks.filter((task) => task.id !== taskId),
-          })),
-        })),
+        set((state) => {
+          const timestamp = new Date().toISOString();
+          return {
+            sheets: updateSheet(state.sheets, sheetId, (sheet) => ({
+              ...sheet,
+              updatedAt: timestamp,
+              tasks: sheet.tasks.filter((task) => task.id !== taskId),
+            })),
+          };
+        }),
       setTaskStatus: (sheetId, taskId, status, completionMethod = "manual") =>
         set((state) => {
           const timestamp = new Date().toISOString();
           return {
             sheets: state.sheets.map((sheet) => ({
               ...sheet,
+              ...(sheet.id === sheetId ? { updatedAt: timestamp } : {}),
               tasks: sheet.tasks.map((task) =>
                 sheet.id === sheetId && task.id === taskId
                   ? {
                       ...task,
                       status,
+                      actualMinutes:
+                        status === "Completed" &&
+                        completionMethod === "manual"
+                          ? null
+                          : task.actualMinutes,
                       updatedAt: timestamp,
                       completedAt:
                         status === "Completed"
@@ -198,13 +223,13 @@ export const useTaskStore = create<TaskState>()(
                         status === "Completed" ? completionMethod : null,
                     }
                   : status === "InProgress" && task.status === "InProgress"
-                    ? { ...task, status: "Paused" as const }
+                    ? { ...task, status: "Paused" as const, updatedAt: timestamp }
                     : task,
               ),
             })),
           };
         }),
-      applyTimerSession: (sheetId, taskId, sessionId, minutes, status) =>
+      applyTimerSession: (sheetId, taskId, sessionId, minutes, status, updatedAt) =>
         set((state) => {
           const alreadyApplied =
             state.appliedTimerSessionIds.includes(sessionId);
@@ -216,18 +241,19 @@ export const useTaskStore = create<TaskState>()(
             appliedTimerSessionIds,
             sheets: updateSheet(state.sheets, sheetId, (sheet) => ({
               ...sheet,
+              updatedAt,
               tasks: sheet.tasks.map((task) =>
                 task.id === taskId
                   ? {
                       ...task,
                       actualMinutes: alreadyApplied
                         ? task.actualMinutes
-                        : task.actualMinutes + minutes,
+                        : (task.actualMinutes ?? 0) + minutes,
                       status,
-                      updatedAt: new Date().toISOString(),
+                      updatedAt,
                       completedAt:
                         status === "Completed"
-                          ? task.completedAt ?? new Date().toISOString()
+                          ? task.completedAt ?? updatedAt
                           : null,
                       completionMethod:
                         status === "Completed" ? ("timer" as const) : null,
@@ -240,7 +266,7 @@ export const useTaskStore = create<TaskState>()(
     }),
     {
       name: "tempo-task-sheets",
-      version: 4,
+      version: 6,
       migrate: (persistedState: unknown) => {
         const state = persistedState as Partial<TaskState> | undefined;
         if (
@@ -262,14 +288,23 @@ export const useTaskStore = create<TaskState>()(
           appliedTimerSessionIds: state.appliedTimerSessionIds ?? [],
           sheets: state.sheets.map((sheet) => ({
             ...sheet,
+            updatedAt: sheet.updatedAt ?? sheet.createdAt,
             tasks: sheet.tasks.map((task) => {
               const normalizedTask =
                 task.status === "Completed"
                   ? {
                       ...task,
+                      actualMinutes:
+                        task.completionMethod === "timer"
+                          ? task.actualMinutes ?? 0
+                          : null,
                       completedAt: task.completedAt ?? task.updatedAt,
                     }
-                  : { ...task, completedAt: null };
+                  : {
+                      ...task,
+                      actualMinutes: null,
+                      completedAt: null,
+                    };
               if (task.status !== "InProgress") return normalizedTask;
               if (keptInProgress) {
                 return {

@@ -57,8 +57,31 @@ function ClockUnit({ value, label }: { value: number; label: string }) {
   );
 }
 
-export function FlipClock({ totalSeconds }: { totalSeconds: number }) {
+export function FlipClock({
+  totalSeconds,
+  overtime = false,
+}: {
+  totalSeconds: number;
+  overtime?: boolean;
+}) {
   const clampedSeconds = Math.max(0, Math.floor(totalSeconds));
+  if (overtime) {
+    const minutes = Math.floor(clampedSeconds / 60);
+    const seconds = clampedSeconds % 60;
+    return (
+      <div
+        className="flex items-center justify-center gap-2"
+        role="timer"
+        aria-label={`Overtime ${minutes} minutes ${seconds} seconds`}
+        aria-live="off"
+      >
+        <span className="mb-6 text-4xl font-semibold text-amber-500 sm:text-6xl">+</span>
+        <ClockUnit value={minutes} label="Overtime minutes" />
+        <span className="mb-6 text-2xl font-light text-amber-500/70 sm:text-4xl">:</span>
+        <ClockUnit value={seconds} label="Overtime seconds" />
+      </div>
+    );
+  }
   const hours = Math.floor(clampedSeconds / 3600);
   const minutes = Math.floor((clampedSeconds % 3600) / 60);
   const seconds = clampedSeconds % 60;

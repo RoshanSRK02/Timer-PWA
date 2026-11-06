@@ -10,6 +10,7 @@ import { ForgotPasswordPage } from "@/features/auth/forgot-password-page";
 import { LoginPage } from "@/features/auth/login-page";
 import { RegisterPage } from "@/features/auth/register-page";
 import { ResetPasswordPage } from "@/features/auth/reset-password-page";
+import { KeyboardShortcutsPage } from "@/features/settings/keyboard-shortcuts";
 
 export function AppRouter() {
   return (
@@ -26,6 +27,7 @@ export function AppRouter() {
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="history" element={<SessionHistoryPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="shortcuts" element={<KeyboardShortcutsPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

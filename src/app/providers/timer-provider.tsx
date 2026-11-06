@@ -69,15 +69,17 @@ export function TimerProvider({ children }: PropsWithChildren) {
       snapshot: TimerSnapshot,
       session: TimerSessionRecord | null = snapshot.lastSession,
     ) {
-      const writes: Promise<unknown>[] = [
-        writeTimerSnapshot(snapshot),
-        writeRemoteTimerSnapshot(snapshot),
-      ];
+      const writes: Promise<unknown>[] = [writeTimerSnapshot(snapshot)];
+      let sessionWrite: Promise<TimerSessionRecord> | null = null;
       if (session) {
-        writes.push(writeTimerSession(session), writeRemoteTimerSession(session));
+        sessionWrite = writeRemoteTimerSession(session);
+        writes.push(writeTimerSession(session), sessionWrite);
       }
 
-      const results = await Promise.allSettled(writes);
+      const [results, winningSnapshot] = await Promise.all([
+        Promise.allSettled(writes),
+        writeRemoteTimerSnapshot(snapshot),
+      ]);
       const failures = results
         .filter((result) => result.status === "rejected")
         .map((result) =>
@@ -88,6 +90,21 @@ export function TimerProvider({ children }: PropsWithChildren) {
         throw new Error(failures.join(" "));
       }
 
+      const winningSession = sessionWrite ? await sessionWrite : null;
+      if (
+        session &&
+        winningSession &&
+        Date.parse(winningSession.updatedAt) > Date.parse(session.updatedAt)
+      ) {
+        await writeTimerSession(winningSession);
+      }
+
+      if (
+        userId &&
+        Date.parse(winningSnapshot.updatedAt) > Date.parse(snapshot.updatedAt)
+      ) {
+        useTimerStore.getState().restoreSnapshot(winningSnapshot, userId);
+      }
       if (session) persistedSessionId = session.id;
       if (active) setError(null);
     }
@@ -223,33 +240,52 @@ export function TimerProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (authLoading || !userId) return;
 
-    const synchronizeTimer = () => {
-      if (!navigator.onLine || !timerHydratedRef.current) return;
+    let synchronizing = false;
+    const synchronizeTimer = async () => {
+      if (
+        !navigator.onLine ||
+        !timerHydratedRef.current ||
+        synchronizing
+      ) return;
       const snapshot = useTimerStore.getState().toSnapshot();
       if (!snapshot) return;
-      const writes: Promise<unknown>[] = [
-        writeRemoteTimerSnapshot(snapshot),
-      ];
-      void readLocalTimerSessions(userId)
-        .then((sessions) => {
-          writes.push(...sessions.map((session) => writeRemoteTimerSession(session)));
-          return Promise.all(writes);
-        })
-        .then(() => setError(null))
-        .catch((syncError: unknown) => setError(getErrorMessage(syncError)));
+      synchronizing = true;
+      try {
+        const [winner, sessions] = await Promise.all([
+          writeRemoteTimerSnapshot(snapshot),
+          readLocalTimerSessions(userId),
+        ]);
+        await Promise.all(sessions.map((session) => writeRemoteTimerSession(session)));
+        if (Date.parse(winner.updatedAt) > Date.parse(snapshot.updatedAt)) {
+          useTimerStore.getState().restoreSnapshot(winner, userId);
+        }
+        setError(null);
+      } catch (syncError) {
+        setError(getErrorMessage(syncError));
+      } finally {
+        synchronizing = false;
+      }
     };
 
-    window.addEventListener("online", synchronizeTimer);
+    const handleOnline = () => void synchronizeTimer();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void synchronizeTimer();
+    };
+    const intervalId = window.setInterval(() => void synchronizeTimer(), 5_000);
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibility);
     const handleServiceWorkerMessage = (event: MessageEvent) => {
-      if (event.data?.type === "TEMPO_SYNC_REQUEST") synchronizeTimer();
+      if (event.data?.type === "TEMPO_SYNC_REQUEST") void synchronizeTimer();
     };
     navigator.serviceWorker?.addEventListener(
       "message",
       handleServiceWorkerMessage,
     );
-    if (navigator.onLine) synchronizeTimer();
+    if (navigator.onLine) void synchronizeTimer();
     return () => {
-      window.removeEventListener("online", synchronizeTimer);
+      window.clearInterval(intervalId);
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibility);
       navigator.serviceWorker?.removeEventListener(
         "message",
         handleServiceWorkerMessage,

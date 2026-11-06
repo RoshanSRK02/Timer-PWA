@@ -13,6 +13,16 @@ export interface TimerSessionHistory {
   syncWarning: string | null;
 }
 
+function normalizeSession(session: TimerSessionRecord): TimerSessionRecord {
+  return {
+    ...session,
+    updatedAt: session.updatedAt ?? session.endedAt,
+    overtimeSeconds:
+      session.overtimeSeconds ??
+      Math.max(0, session.actualSeconds - session.durationSeconds),
+  };
+}
+
 interface RemoteTimerRow {
   user_id: string;
   status: TimerStatus;
@@ -29,6 +39,44 @@ interface RemoteTimerRow {
   completed_sessions: number;
   completion_confirmed: boolean;
   last_session: TimerSessionRecord | null;
+}
+
+interface RemoteTimerSessionRow {
+  id: string;
+  user_id: string;
+  task_sheet_id: string | null;
+  task_id: string | null;
+  break_session: boolean;
+  break_label: string | null;
+  duration_seconds: number;
+  actual_seconds: number;
+  overtime_seconds: number;
+  started_at: string;
+  ended_at: string;
+  outcome: TimerSessionRecord["outcome"];
+  notes: string;
+  updated_at: string;
+}
+
+function fromRemoteTimerSession(
+  row: RemoteTimerSessionRow,
+): TimerSessionRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    taskSheetId: row.task_sheet_id,
+    taskId: row.task_id,
+    breakSession: row.break_session,
+    breakLabel: row.break_label,
+    durationSeconds: row.duration_seconds,
+    actualSeconds: row.actual_seconds,
+    overtimeSeconds: row.overtime_seconds,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    outcome: row.outcome,
+    notes: row.notes ?? "",
+    updatedAt: row.updated_at,
+  };
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -107,7 +155,9 @@ export async function readLocalTimerSessions(
     "readonly",
     (store) => store.getAll() as IDBRequest<TimerSessionRecord[]>,
   );
-  return sessions.filter((session) => session.userId === userId);
+  return sessions
+    .filter((session) => session.userId === userId)
+    .map(normalizeSession);
 }
 
 export async function readTimerSessions(
@@ -121,7 +171,7 @@ export async function readTimerSessions(
       getSupabaseClient()
         .from(SESSIONS_TABLE_NAME)
         .select(
-          "id,user_id,task_sheet_id,task_id,break_session,break_label,duration_seconds,actual_seconds,started_at,ended_at,outcome,notes",
+          "id,user_id,task_sheet_id,task_id,break_session,break_label,duration_seconds,actual_seconds,overtime_seconds,started_at,ended_at,outcome,notes,updated_at",
         )
         .eq("user_id", userId)
         .order("started_at", { ascending: false }),
@@ -132,7 +182,9 @@ export async function readTimerSessions(
 
   if (localResult.status === "fulfilled") {
     for (const session of localResult.value) {
-      if (session.userId === userId) sessions.set(session.id, session);
+      if (session.userId === userId) {
+        sessions.set(session.id, normalizeSession(session));
+      }
     }
   } else {
     errors.push(`Local session history: ${localResult.reason instanceof Error ? localResult.reason.message : "Unable to read IndexedDB."}`);
@@ -143,20 +195,10 @@ export async function readTimerSessions(
       errors.push(`Supabase session history: ${remoteResult.value.error.message}`);
     } else {
       for (const row of remoteResult.value.data ?? []) {
-        sessions.set(row.id, {
-          id: row.id,
-          userId: row.user_id,
-          taskSheetId: row.task_sheet_id,
-          taskId: row.task_id,
-          breakSession: row.break_session,
-          breakLabel: row.break_label,
-          durationSeconds: row.duration_seconds,
-          actualSeconds: row.actual_seconds,
-          startedAt: row.started_at,
-          endedAt: row.ended_at,
-          outcome: row.outcome,
-          notes: row.notes ?? "",
-        });
+        sessions.set(
+          row.id,
+          fromRemoteTimerSession(row as RemoteTimerSessionRow),
+        );
       }
     }
   } else {
@@ -187,23 +229,20 @@ export async function updateTimerSessionNotes(
     (store) => store.get(sessionId) as IDBRequest<TimerSessionRecord | undefined>,
   );
   if (localSession?.userId === userId) {
-    await writeTimerSession({ ...localSession, notes });
+    await writeTimerSession({
+      ...normalizeSession(localSession),
+      notes,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
-  const { data, error } = await getSupabaseClient()
-    .from(SESSIONS_TABLE_NAME)
-    .update({ notes })
-    .eq("id", sessionId)
-    .eq("user_id", userId)
-    .select("id")
-    .maybeSingle();
+  const { data, error } = await getSupabaseClient().rpc(
+    "update_pomodoro_timer_session_notes",
+    { p_session_id: sessionId, p_notes: notes },
+  );
 
   if (error) throw error;
-  if (!data) {
-    throw new Error(
-      "Session notes were saved locally, but the remote session was not found. Apply the session notes migration and try again.",
-    );
-  }
+  void data;
 }
 
 export async function readRemoteTimerSnapshot(
@@ -236,13 +275,13 @@ export async function readRemoteTimerSnapshot(
     updatedAt: row.updated_at,
     completedSessions: row.completed_sessions,
     completionConfirmed: row.completion_confirmed,
-    lastSession: row.last_session,
+    lastSession: row.last_session ? normalizeSession(row.last_session) : null,
   };
 }
 
 export async function writeRemoteTimerSnapshot(
   snapshot: TimerSnapshot,
-): Promise<void> {
+): Promise<TimerSnapshot> {
   const row: RemoteTimerRow = {
     user_id: snapshot.userId,
     status: snapshot.status,
@@ -260,20 +299,42 @@ export async function writeRemoteTimerSnapshot(
     completion_confirmed: snapshot.completionConfirmed,
     last_session: snapshot.lastSession,
   };
-  const { error } = await getSupabaseClient()
-    .from(TABLE_NAME)
-    .upsert(row, { onConflict: "user_id" });
+  const { data, error } = await getSupabaseClient().rpc(
+    "sync_pomodoro_timer_state_last_modified",
+    { p_snapshot: row },
+  );
 
   if (error) throw error;
+  if (!data) throw new Error("Timer synchronization returned no winning state.");
+  const winner = data as RemoteTimerRow;
+  return {
+    userId: winner.user_id,
+    status: winner.status,
+    taskSheetId: winner.task_sheet_id,
+    taskId: winner.task_id,
+    durationSeconds: winner.duration_seconds,
+    accumulatedSeconds: winner.accumulated_seconds,
+    startedAt: winner.started_at,
+    sessionId: winner.session_id,
+    sessionStartedAt: winner.session_started_at,
+    breakSession: winner.break_session,
+    breakLabel: winner.break_label,
+    updatedAt: winner.updated_at,
+    completedSessions: winner.completed_sessions,
+    completionConfirmed: winner.completion_confirmed,
+    lastSession: winner.last_session
+      ? normalizeSession(winner.last_session)
+      : null,
+  };
 }
 
 export async function writeRemoteTimerSession(
   session: TimerSessionRecord,
-): Promise<void> {
-  const { error } = await getSupabaseClient()
-    .from(SESSIONS_TABLE_NAME)
-    .upsert(
-      {
+): Promise<TimerSessionRecord> {
+  const { data, error } = await getSupabaseClient().rpc(
+    "sync_pomodoro_timer_session_last_modified",
+    {
+      p_session: {
         id: session.id,
         user_id: session.userId,
         task_sheet_id: session.taskSheetId,
@@ -283,14 +344,18 @@ export async function writeRemoteTimerSession(
         notes: session.notes,
         duration_seconds: session.durationSeconds,
         actual_seconds: session.actualSeconds,
+        overtime_seconds: session.overtimeSeconds,
         started_at: session.startedAt,
         ended_at: session.endedAt,
         outcome: session.outcome,
+        updated_at: session.updatedAt,
       },
-      { onConflict: "id" },
-    );
+    },
+  );
 
   if (error) throw error;
+  if (!data) throw new Error("Timer session synchronization returned no winning session.");
+  return fromRemoteTimerSession(data as RemoteTimerSessionRow);
 }
 
 export function chooseLatestSnapshot(

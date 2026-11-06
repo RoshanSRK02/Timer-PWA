@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowUpRight,
@@ -6,6 +7,8 @@ import {
   Check,
   Coffee,
   Expand,
+  Focus,
+  Keyboard,
   Minimize2,
   Pause,
   Play,
@@ -27,9 +30,11 @@ import { useTaskStore } from "@/stores/use-task-store";
 import { useTimerPreferencesStore } from "@/stores/use-timer-preferences-store";
 import { playAlarmSound } from "@/services/alarm-sounds";
 import {
+  getTimerOvertimeSeconds,
   getTimerRemainingSeconds,
   useTimerStore,
 } from "@/stores/use-timer-store";
+import { KeyboardShortcutsDialog } from "@/features/settings/keyboard-shortcuts";
 
 const presets = [
   { label: "Focus", minutes: 25, icon: Target },
@@ -95,6 +100,9 @@ export function DashboardPage() {
   } | null>(null);
   const [isAutoPlayCountdown, setIsAutoPlayCountdown] = useState(true);
   const [timerStageError, setTimerStageError] = useState<string | null>(null);
+  const [wakeLockError, setWakeLockError] = useState<string | null>(null);
+  const [focusMode, setFocusMode] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const timerStageRef = useRef<HTMLDivElement>(null);
   const lastSessionIdRef = useRef(timer.lastSession?.id ?? null);
   const lastAutoPlaySessionIdRef = useRef(timer.lastSession?.id ?? null);
@@ -102,6 +110,7 @@ export function DashboardPage() {
   const lastAlarmStatusRef = useRef(status);
   const intention = intentions[intentionIndex]!;
   const remainingSeconds = getTimerRemainingSeconds(timer, clockNow);
+  const overtimeSeconds = getTimerOvertimeSeconds(timer, clockNow);
   const progress =
     durationSeconds > 0
       ? ((durationSeconds - remainingSeconds) / durationSeconds) * 100
@@ -116,10 +125,71 @@ export function DashboardPage() {
     : 0;
 
   useEffect(() => {
-    if (status !== "running" && !nextTaskPrompt) return;
+    if (
+      status !== "running" &&
+      !(status === "overtime" && timer.startedAt) &&
+      !nextTaskPrompt
+    ) return;
     const intervalId = window.setInterval(() => setClockNow(Date.now()), 250);
     return () => window.clearInterval(intervalId);
-  }, [status, nextTaskPrompt]);
+  }, [status, timer.startedAt, nextTaskPrompt]);
+
+  useEffect(() => {
+    const handleToggleDrawer = () => setIsTaskPanelOpen((open) => !open);
+    const handleToggleFocus = () => setFocusMode((active) => !active);
+    const handleShowShortcuts = () => setShortcutsOpen(true);
+    window.addEventListener("tempo:toggle-drawer", handleToggleDrawer);
+    window.addEventListener("tempo:toggle-focus", handleToggleFocus);
+    window.addEventListener("tempo:show-shortcuts", handleShowShortcuts);
+    return () => {
+      window.removeEventListener("tempo:toggle-drawer", handleToggleDrawer);
+      window.removeEventListener("tempo:toggle-focus", handleToggleFocus);
+      window.removeEventListener("tempo:show-shortcuts", handleShowShortcuts);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("focus-mode", focusMode);
+    return () => document.body.classList.remove("focus-mode");
+  }, [focusMode]);
+
+  useEffect(() => {
+    if (status !== "running" && !(status === "overtime" && timer.startedAt)) {
+      setWakeLockError(null);
+      return;
+    }
+
+    if (!("wakeLock" in navigator)) return;
+    let active = true;
+    let wakeLock: WakeLockSentinel | null = null;
+    const requestWakeLock = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        setWakeLockError(null);
+      } catch (error) {
+        if (active) {
+          setWakeLockError(
+            error instanceof Error
+              ? `Screen wake lock unavailable: ${error.message}`
+              : "Screen wake lock is unavailable in this browser.",
+          );
+        }
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && (!wakeLock || wakeLock.released)) {
+        void requestWakeLock();
+      }
+    };
+    void requestWakeLock();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (wakeLock && !wakeLock.released) void wakeLock.release();
+    };
+  }, [status, timer.startedAt]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -275,13 +345,118 @@ export function DashboardPage() {
     setIsAutoPlayCountdown(false);
   }
 
+  const completionDialog =
+    status === "awaiting-completion" && !timer.completionConfirmed ? (
+      <motion.div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        role="presentation"
+      >
+        <motion.section
+          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8 }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="timer-completion-title"
+          className="w-full max-w-sm rounded-2xl border bg-card p-6 shadow-2xl"
+        >
+          <span className="mb-4 flex size-11 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="size-6" />
+          </span>
+          <h2 id="timer-completion-title" className="text-xl font-semibold tracking-tight">
+            Was the task completed?
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {activeTask?.title
+              ? `Your focus session for “${activeTask.title}” has ended.`
+              : "Your focus session has ended."}
+          </p>
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <Button type="button" variant="outline" onClick={() => resolveTaskCompletion(false)}>
+              No
+            </Button>
+            <Button
+              type="button"
+              onClick={() =>
+                activeTask &&
+                !focusMode &&
+                isTaskPanelOpen
+                  ? confirmTaskCompletion()
+                  : resolveTaskCompletion(true)
+              }
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              <Check className="size-4" /> Yes
+            </Button>
+          </div>
+        </motion.section>
+      </motion.div>
+    ) : null;
+  const breakDrawer = (
+    <BreakDrawer
+      open={breakDrawerOpen}
+      onClose={() => setBreakDrawerOpen(false)}
+      disabled={status !== "idle" || isTimerLoading}
+    />
+  );
+  const nextTaskPromptView = (
+    <AnimatePresence>
+      {nextTaskPrompt && (
+        <motion.aside
+          initial={{ opacity: 0, y: 16, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 12, scale: 0.98 }}
+          className="fixed bottom-5 right-5 z-40 w-[min(24rem,calc(100vw-2.5rem))] rounded-2xl border bg-card p-5 shadow-2xl"
+          aria-live="polite"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+            Next task
+          </p>
+          <p className="mt-1 truncate font-semibold">{nextTaskPrompt.title}</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {nextTaskCountdown > 0
+              ? `Starting in ${nextTaskCountdown} seconds`
+              : autoPlay
+                ? "Starting now..."
+                : "Ready when you are"}
+          </p>
+          <div className="mt-4 flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              className="flex-1"
+              onClick={startNextTaskNow}
+              disabled={status !== "idle"}
+            >
+              <Play className="size-4 fill-current" /> Start now
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setNextTaskPrompt(null);
+                setIsAutoPlayCountdown(false);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </motion.aside>
+      )}
+    </AnimatePresence>
+  );
+
   return (
-    <div className="space-y-8">
+    <div className={`space-y-8 ${focusMode ? "focus-mode-active" : ""}`}>
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end"
+        className="focus-hidden flex flex-col justify-between gap-5 sm:flex-row sm:items-end"
       >
         <div>
           <p className="mb-2 flex items-center gap-2 text-sm font-medium text-primary">
@@ -311,11 +486,35 @@ export function DashboardPage() {
       <div className="focus-workspace-layout">
       <div
         ref={timerStageRef}
+        id="timer-stage"
+        tabIndex={-1}
         className={`timer-stage ${
           isFullscreen ? "timer-fullscreen" : ""
-        } space-y-4`}
+        } ${status === "overtime" ? "timer-overtime" : ""} oled-pixel-shift relative space-y-4`}
       >
         <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setFocusMode((active) => !active)}
+            aria-pressed={focusMode}
+            title="Toggle Focus Mode (Shift+F)"
+          >
+            <Focus className="size-4" />
+            <span className="hidden sm:inline">{focusMode ? "Exit focus" : "Focus mode"}</span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="focus-hidden size-9"
+            onClick={() => setShortcutsOpen(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="size-4" />
+          </Button>
           {isFullscreen && (
             <Button
               type="button"
@@ -347,6 +546,11 @@ export function DashboardPage() {
             {timerStageError}
           </p>
         )}
+        {wakeLockError && (
+          <p className="text-right text-xs text-muted-foreground" role="status">
+            {wakeLockError}
+          </p>
+        )}
 
       <div className="timer-grid grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.8fr)]">
         <motion.div
@@ -355,8 +559,8 @@ export function DashboardPage() {
           transition={{ duration: 0.4, delay: 0.08 }}
         >
           <Card className="relative flex min-h-[480px] flex-col items-center justify-center overflow-hidden px-5 py-10 sm:min-h-[520px]">
-            <div className="pointer-events-none absolute -right-24 -top-32 size-80 rounded-full bg-primary/[0.05] blur-3xl" />
-            <div className="relative mb-8 flex items-center gap-1 rounded-xl bg-secondary p-1">
+            <div className="oled-hidden pointer-events-none absolute -right-24 -top-32 size-80 rounded-full bg-primary/[0.05] blur-3xl" />
+            <div className="focus-hidden relative mb-8 flex items-center gap-1 rounded-xl bg-secondary p-1">
               {presets.map(({ label, minutes, icon: Icon }) => (
                 <button
                   type="button"
@@ -411,7 +615,9 @@ export function DashboardPage() {
               </svg>
               <div className="text-center">
                 <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                  {activeTask
+                  {status === "overtime"
+                    ? "OVERTIME"
+                    : activeTask
                     ? "Task focus"
                     : timer.breakSession
                       ? timer.breakLabel ?? "Break"
@@ -424,7 +630,15 @@ export function DashboardPage() {
               </div>
             </div>
 
-            <FlipClock totalSeconds={remainingSeconds} />
+            <FlipClock
+              totalSeconds={status === "overtime" ? overtimeSeconds : remainingSeconds}
+              overtime={status === "overtime"}
+            />
+            {status === "overtime" && (
+              <p className="relative mt-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold tracking-[0.16em] text-amber-600 dark:text-amber-400">
+                OVERTIME
+              </p>
+            )}
             <p className="relative mt-3 max-w-[80%] truncate text-center text-sm text-muted-foreground">
               {activeTask?.title ??
                 (timer.breakSession
@@ -435,7 +649,7 @@ export function DashboardPage() {
             </p>
 
             <div className="relative mt-8 flex items-center gap-3">
-              {status === "running" || status === "paused" ? (
+              {status === "running" || status === "paused" || status === "overtime" ? (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -447,12 +661,26 @@ export function DashboardPage() {
                   <Square className="size-4 fill-current" />
                 </Button>
               ) : null}
-              {status !== "awaiting-completion" && (
+              {status === "overtime" ? (
+                <Button
+                  size="default"
+                  className="min-w-36 rounded-xl px-7"
+                  onClick={timer.startedAt ? pause : timer.resume}
+                  title="Pause or resume overtime (Space)"
+                >
+                  {timer.startedAt ? (
+                    <><Pause className="size-4" /> Pause overtime</>
+                  ) : (
+                    <><Play className="size-4 fill-current" /> Resume overtime</>
+                  )}
+                </Button>
+              ) : status !== "awaiting-completion" && (
                 <Button
                   size="default"
                   className="min-w-36 rounded-xl px-7"
                   onClick={status === "running" ? pause : start}
                   disabled={isTimerLoading}
+                  title={`${status === "running" ? "Pause" : "Resume"} timer (Space)`}
                 >
                   {status === "running" ? (
                     <>
@@ -476,7 +704,8 @@ export function DashboardPage() {
                   variant="outline"
                   disabled={
                     status !== "running" &&
-                    status !== "paused"
+                    status !== "paused" &&
+                    status !== "overtime"
                   }
                   onClick={() => extend(minutes)}
                   aria-label={`Add ${minutes} minutes to timer`}
@@ -490,16 +719,17 @@ export function DashboardPage() {
                 size="sm"
                 variant="ghost"
                 disabled={
-                  (status !== "running" && status !== "paused") ||
-                  remainingSeconds === durationSeconds
+                  (status !== "running" && status !== "paused" && status !== "overtime") ||
+                  status !== "overtime" && remainingSeconds === durationSeconds
                 }
                 onClick={() => finishEarly()}
+                title="Finish task (F)"
               >
                 <TimerReset className="size-4" />
-                Finish early
+              {status === "overtime" ? "Finish" : "Finish early"}
               </Button>
             </div>
-            <div className="relative mt-4 flex flex-wrap items-center justify-center gap-2">
+            <div className="focus-hidden relative mt-4 flex flex-wrap items-center justify-center gap-2">
               <Button
                 type="button"
                 size="sm"
@@ -556,7 +786,7 @@ export function DashboardPage() {
           </Card>
         </motion.div>
 
-        <div className="space-y-5">
+        <div className={`space-y-5 ${focusMode ? "focus-hidden" : ""}`}>
           <Card className="p-5 sm:p-6">
             <div className="mb-5 flex items-center justify-between">
               <div>
@@ -617,121 +847,30 @@ export function DashboardPage() {
         </div>
       </div>
 
-        {isFullscreen && isTaskPanelOpen && <TaskManager />}
+        {completionDialog
+          ? isFullscreen && timerStageRef.current
+            ? createPortal(completionDialog, timerStageRef.current)
+            : completionDialog
+          : null}
+        <AnimatePresence>
+          {shortcutsOpen && (
+            <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} />
+          )}
+        </AnimatePresence>
+        {isFullscreen && isTaskPanelOpen && !focusMode && <TaskManager />}
       </div>
 
-      {!isFullscreen && <TaskManager />}
+      {!isFullscreen && isTaskPanelOpen && !focusMode && <TaskManager />}
       </div>
 
-      <BreakDrawer
-        open={breakDrawerOpen}
-        onClose={() => setBreakDrawerOpen(false)}
-        disabled={status !== "idle" || isTimerLoading}
-      />
+      {isFullscreen && timerStageRef.current
+        ? createPortal(breakDrawer, timerStageRef.current)
+        : breakDrawer}
 
-      <AnimatePresence>
-        {nextTaskPrompt && (
-          <motion.aside
-            initial={{ opacity: 0, y: 16, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.98 }}
-            className="fixed bottom-5 right-5 z-40 w-[min(24rem,calc(100vw-2.5rem))] rounded-2xl border bg-card p-5 shadow-2xl"
-            aria-live="polite"
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
-              Next task
-            </p>
-            <p className="mt-1 truncate font-semibold">{nextTaskPrompt.title}</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {nextTaskCountdown > 0
-                ? `Starting in ${nextTaskCountdown} seconds`
-                : autoPlay
-                  ? "Starting now..."
-                  : "Ready when you are"}
-            </p>
-            <div className="mt-4 flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="flex-1"
-                onClick={startNextTaskNow}
-                disabled={status !== "idle"}
-              >
-                <Play className="size-4 fill-current" /> Start now
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setNextTaskPrompt(null);
-                  setIsAutoPlayCountdown(false);
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
+      {isFullscreen && timerStageRef.current
+        ? createPortal(nextTaskPromptView, timerStageRef.current)
+        : nextTaskPromptView}
 
-      <AnimatePresence>
-        {status === "awaiting-completion" && !timer.completionConfirmed && (
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            role="presentation"
-          >
-            <motion.section
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8 }}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="timer-completion-title"
-              className="w-full max-w-sm rounded-2xl border bg-card p-6 shadow-2xl"
-            >
-              <span className="mb-4 flex size-11 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                <CheckCircle2 className="size-6" />
-              </span>
-              <h2
-                id="timer-completion-title"
-                className="text-xl font-semibold tracking-tight"
-              >
-                Was this task completed?
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {activeTask?.title
-                  ? `Your focus session for “${activeTask.title}” has ended.`
-                  : "Your focus session has ended."}{" "}
-                Your time will be saved either way.
-              </p>
-              <div className="mt-6 grid grid-cols-2 gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => resolveTaskCompletion(false)}
-                >
-                  No, not yet
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() =>
-                    activeTask
-                      ? confirmTaskCompletion()
-                      : resolveTaskCompletion(true)
-                  }
-                  className="bg-emerald-600 text-white hover:bg-emerald-700"
-                >
-                  <Check className="size-4" /> Yes, completed
-                </Button>
-              </div>
-            </motion.section>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

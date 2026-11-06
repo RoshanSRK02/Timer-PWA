@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
-import { Check, Database, MoonStar, Settings2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Check, Database, Keyboard, MoonStar, Settings2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { TimerSettings } from "@/features/dashboard/timer-settings";
@@ -58,6 +59,38 @@ export function SettingsPage() {
           </div>
         </div>
         <ThemeToggle />
+      </Card>
+
+      <Card className="p-5 sm:p-7">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
+              <Keyboard className="size-5" />
+            </span>
+            <div>
+              <h2 className="font-semibold">Keyboard Shortcuts</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                View timer, task, and navigation shortcuts.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/shortcuts"
+            className="shrink-0 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-secondary"
+          >
+            View shortcuts
+          </Link>
+        </div>
+      </Card>
+
+      <Card className="p-5 sm:p-7">
+        <h2 className="font-semibold">About</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Application version
+        </p>
+        <p className="mt-3 font-mono text-sm">
+          {import.meta.env.VITE_APP_VERSION ?? "v1.0.0"}
+        </p>
       </Card>
 
       <Card className="p-5 sm:p-7">

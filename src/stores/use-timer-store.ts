@@ -36,14 +36,19 @@ function getElapsedSeconds(
 ): number {
   let elapsed = state.accumulatedSeconds;
 
-  if (state.status === "running" && state.startedAt) {
+  if (
+    (state.status === "running" || state.status === "overtime") &&
+    state.startedAt
+  ) {
     const startedAt = Date.parse(state.startedAt);
     if (Number.isFinite(startedAt)) {
       elapsed += Math.max(0, Math.floor((now - startedAt) / 1000));
     }
   }
 
-  return Math.min(state.durationSeconds, elapsed);
+  return state.status === "overtime"
+    ? elapsed
+    : Math.min(state.durationSeconds, elapsed);
 }
 
 export function getTimerElapsedSeconds(
@@ -58,6 +63,15 @@ export function getTimerRemainingSeconds(
   now = Date.now(),
 ): number {
   return Math.max(0, state.durationSeconds - getElapsedSeconds(state, now));
+}
+
+export function getTimerOvertimeSeconds(
+  state: TimerState,
+  now = Date.now(),
+): number {
+  return state.status === "overtime"
+    ? Math.max(0, getElapsedSeconds(state, now) - state.durationSeconds)
+    : 0;
 }
 
 type TimerData = Omit<
@@ -119,12 +133,14 @@ function createSessionRecord(
     taskId: state.taskId,
     durationSeconds: state.durationSeconds,
     actualSeconds,
+    overtimeSeconds: Math.max(0, actualSeconds - state.durationSeconds),
     startedAt: state.sessionStartedAt ?? state.startedAt ?? endedAt,
     endedAt,
     breakSession: state.breakSession,
     breakLabel: state.breakLabel,
     notes: "",
     outcome,
+    updatedAt: endedAt,
   };
 }
 
@@ -160,7 +176,10 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         return false;
       }
       if (current.status === "paused") get().resume();
-      return current.status !== "awaiting-completion";
+      return (
+        current.status !== "awaiting-completion" &&
+        current.status !== "overtime"
+      );
     }
 
     if (!Number.isFinite(minutes) || minutes < 1) return false;
@@ -220,6 +239,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         lastSession.id,
         elapsedSeconds / 60,
         "Paused",
+        lastSession.updatedAt,
       );
     } else {
       taskState.setTaskStatus(
@@ -295,7 +315,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
   pause: () => {
     const current = get();
-    if (current.status !== "running") return;
+    if (current.status !== "running" && current.status !== "overtime") return;
 
     const timestamp = Date.now();
     if (current.taskSheetId && current.taskId) {
@@ -304,7 +324,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         .setTaskStatus(current.taskSheetId, current.taskId, "Paused");
     }
     set({
-      status: "paused",
+      status: current.status === "overtime" ? "overtime" : "paused",
       accumulatedSeconds: getElapsedSeconds(current, timestamp),
       startedAt: null,
       updatedAt: nowIso(timestamp),
@@ -312,7 +332,10 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
   resume: () => {
     const current = get();
-    if (current.status !== "paused") return;
+    if (
+      current.status !== "paused" &&
+      !(current.status === "overtime" && !current.startedAt)
+    ) return;
 
     const timestamp = nowIso();
     if (current.taskSheetId && current.taskId) {
@@ -321,14 +344,18 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         .setTaskStatus(current.taskSheetId, current.taskId, "InProgress");
     }
     set({
-      status: "running",
+      status: current.status === "overtime" ? "overtime" : "running",
       startedAt: timestamp,
       updatedAt: timestamp,
     });
   },
   stop: (now = Date.now()) => {
     const current = get();
-    if (current.status !== "running" && current.status !== "paused") return;
+    if (
+      current.status !== "running" &&
+      current.status !== "paused" &&
+      current.status !== "overtime"
+    ) return;
 
     const elapsedSeconds = getElapsedSeconds(current, now);
     const endedAt = nowIso(now);
@@ -346,6 +373,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         lastSession.id,
         elapsedSeconds / 60,
         "Pending",
+        lastSession.updatedAt,
       );
     } else if (current.taskSheetId && current.taskId) {
       useTaskStore
@@ -368,19 +396,30 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (
       !Number.isFinite(minutes) ||
       minutes < 1 ||
-      (current.status !== "running" && current.status !== "paused")
+      (current.status !== "running" &&
+        current.status !== "paused" &&
+        current.status !== "overtime")
     ) {
       return;
     }
 
+    const addedSeconds = Math.floor(minutes * 60);
     set({
-      durationSeconds: current.durationSeconds + Math.floor(minutes * 60),
+      durationSeconds: current.durationSeconds + addedSeconds,
+      accumulatedSeconds:
+        current.status === "overtime"
+          ? current.accumulatedSeconds + addedSeconds
+          : current.accumulatedSeconds,
       updatedAt: nowIso(),
     });
   },
   finishEarly: (now = Date.now()) => {
     const current = get();
-    if (current.status !== "running" && current.status !== "paused") return;
+    if (
+      current.status !== "running" &&
+      current.status !== "paused" &&
+      current.status !== "overtime"
+    ) return;
     const elapsedSeconds = getElapsedSeconds(current, now);
     if (elapsedSeconds < 1) return;
 
@@ -401,6 +440,11 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         ),
         updatedAt: endedAt,
       });
+      return;
+    }
+
+    if (current.status === "overtime") {
+      get().resolveTaskCompletion(true, now);
       return;
     }
 
@@ -464,12 +508,28 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
   resolveTaskCompletion: (completed, now = Date.now()) => {
     const current = get();
-    if (current.status !== "awaiting-completion") return;
+    if (
+      current.status !== "awaiting-completion" &&
+      current.status !== "overtime"
+    ) return;
+
+    if (!completed && current.status === "awaiting-completion") {
+      const timestamp = nowIso(now);
+      set({
+        status: "overtime",
+        accumulatedSeconds: current.durationSeconds,
+        startedAt: timestamp,
+        updatedAt: timestamp,
+        completionConfirmed: false,
+      });
+      return;
+    }
 
     const endedAt = nowIso(now);
+    const actualSeconds = getElapsedSeconds(current, now);
     const lastSession = createSessionRecord(
       current,
-      current.accumulatedSeconds,
+      actualSeconds,
       endedAt,
       completed ? "completed" : "incomplete",
     );
@@ -478,8 +538,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         current.taskSheetId,
         current.taskId,
         lastSession.id,
-        current.accumulatedSeconds / 60,
+        actualSeconds / 60,
         completed ? "Completed" : "Pending",
+        lastSession.updatedAt,
       );
     } else if (current.taskSheetId && current.taskId) {
       useTaskStore.getState().setTaskStatus(
@@ -522,7 +583,18 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       sessionStartedAt: snapshot.sessionStartedAt ?? snapshot.startedAt,
       breakSession: snapshot.breakSession ?? false,
       breakLabel: snapshot.breakLabel ?? null,
-      lastSession: snapshot.lastSession ?? null,
+      lastSession: snapshot.lastSession
+        ? {
+            ...snapshot.lastSession,
+            overtimeSeconds:
+              snapshot.lastSession.overtimeSeconds ??
+              Math.max(
+                0,
+                snapshot.lastSession.actualSeconds -
+                  snapshot.lastSession.durationSeconds,
+              ),
+          }
+        : null,
     };
 
     if (
@@ -549,7 +621,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       accumulatedSeconds:
         current.accumulatedSeconds,
       startedAt:
-        current.status === "running" ? current.startedAt : null,
+        current.status === "running" || current.status === "overtime"
+          ? current.startedAt
+          : null,
       updatedAt: current.updatedAt,
       completedSessions: current.completedSessions,
       completionConfirmed: current.completionConfirmed,

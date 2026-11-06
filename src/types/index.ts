@@ -1,9 +1,10 @@
-export type ThemePreference = "light" | "dark" | "system";
+export type ThemePreference = "light" | "dark" | "oled" | "system";
 export type TimerStatus =
   | "idle"
   | "running"
   | "paused"
-  | "awaiting-completion";
+  | "awaiting-completion"
+  | "overtime";
 
 export interface TimerSnapshot {
   userId: string;
@@ -30,12 +31,14 @@ export interface TimerSessionRecord {
   taskId: string | null;
   durationSeconds: number;
   actualSeconds: number;
+  overtimeSeconds: number;
   startedAt: string;
   endedAt: string;
   breakSession: boolean;
   breakLabel: string | null;
   notes: string;
   outcome: "stopped" | "completed" | "incomplete";
+  updatedAt: string;
 }
 
 export interface FocusSession {
@@ -59,7 +62,7 @@ export interface Task {
   id: string;
   title: string;
   estimatedMinutes: number;
-  actualMinutes: number;
+  actualMinutes: number | null;
   status: TaskStatus;
   createdAt: string;
   updatedAt: string;
@@ -72,4 +75,5 @@ export interface TaskSheet {
   name: string;
   tasks: Task[];
   createdAt: string;
+  updatedAt: string;
 }

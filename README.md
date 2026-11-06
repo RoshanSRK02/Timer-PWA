@@ -9,7 +9,7 @@ Tempo is a React, TypeScript, and Vite application with Supabase authentication.
    `VITE_SUPABASE_ANON_KEY` from your Supabase project.
 3. Add your local and deployed app URLs to **Authentication → URL Configuration**
    in the Supabase dashboard. Set the site URL to your production origin.
-4. Apply the SQL migration in `supabase/migrations` to your Supabase project.
+4. Apply every SQL migration in `supabase/migrations` to your Supabase project.
 5. Run `npm run dev`.
 
 The Supabase anon/publishable key is intended for browser use. Never expose a
@@ -74,16 +74,13 @@ required on receiving devices.
   confirmation is required.
 - Enable Google and configure its OAuth client credentials. Add the Supabase
   callback URL shown by the provider settings to the Google OAuth client.
-- Enable Azure (Microsoft) and configure its client credentials. The app asks
-  for the `email` scope. Add the Supabase callback URL shown by the provider
-  settings to the Microsoft identity platform app registration.
 - Add each local and production app origin to the Supabase redirect URL allow
   list. OAuth returns to the app origin; password recovery returns to
   `/reset-password`.
 
 ## Authentication routes
 
-- `/login` — email/password and Google or Microsoft OAuth
+- `/login` — email/password and Google OAuth
 - `/register` — account registration with optional email confirmation
 - `/forgot-password` — sends a password recovery email
 - `/reset-password` — completes a valid password recovery session
@@ -96,19 +93,26 @@ them to their originally requested route after successful sign-in.
 The dashboard includes task sheets and searchable task lists. Sheets and tasks
 are persisted locally in Dexie and Zustand. Starting a task from its play
 control starts the focus timer at the task's estimate and tracks actual
-minutes while the timer is running. Completed tasks are kept in a separate
-collapsible list.
+minutes from timer sessions. Active and completed tasks share a single list;
+completed tasks are sorted last and remain searchable and filterable. Actual
+time is read-only and manual completion has no actual-time value.
+On upgrade, legacy actual totals for incomplete and manually completed tasks are
+cleared because their source cannot be verified; saved timer sessions remain in
+session history, and completed timer-tracked totals are preserved.
 The task-row check action asks for confirmation, then marks the task complete
 without starting a timer or creating a focus session. Completion source is
 stored as `manual` or `timer`; timer completions continue to record the actual
-session duration, while quick completion leaves actual time and focus-time
-statistics unchanged. Apply
+session duration, while manual completion sets actual time to null and does
+not add focus time. Apply
 `202611020006_task_completion_method.sql` after the core schema migration to
 store this field in the normalized task table. Apply
 `202611020007_task_paused_status.sql` to add the paused status to the normalized
-schema and enforce a single in-progress task per user.
+schema and enforce a single in-progress task per user. Apply
+`202611020008_overtime_and_manual_task_time.sql` to support overtime sessions
+and null actual time for manual completions.
 
-Each task row offers Complete, Pause, and Start/Resume actions. Pause retains
+Each task row offers Complete, Pause, and Start/Resume actions before the task
+title. Pause retains
 the current timer snapshot and elapsed time. Starting another task prompts for
 confirmation; Pause & Start saves the current session and its elapsed time,
 marks that task Paused, then starts the selected task.
@@ -119,12 +123,21 @@ progress is also recorded in IndexedDB and `pomodoro_timer_sessions`. The
 Supabase migration enables row-level security so a user can only access their
 own timer records.
 
+When a timer reaches zero, answering No enters overtime and continues tracking
+time in amber. Timer sessions record estimated, actual, and overtime duration.
 The timer includes an animated hours/minutes/seconds clock, synthesized alarm
 tones with saved sound and volume preferences, fullscreen mode, time extensions,
 early completion, and timed breaks. Alarm playback requires a browser that
 supports the Web Audio API; browsers may require a user gesture before audio
 can play. The optional next-task autoplay preference starts the next pending
 task in the completed task's sheet after a 10-second prompt.
+
+The desktop sidebar is a hover-expandable icon rail with a compact Dynamic
+Island timer. Light, Dark, and OLED themes are available. While a timer runs,
+the app requests the Screen Wake Lock API when supported. Use Shift+F for Focus
+Mode or `?` to view keyboard shortcuts. The application version is shown in the
+footer and Settings > About; GitHub Actions uses the package version or a
+semantic-version release tag.
 
 ## Analytics and session history
 
@@ -150,12 +163,15 @@ per-user workspace sync queue. Task creation, edits, deletion, completion, and
 starting a timer remain available offline. Timer snapshots and all locally
 recorded sessions are retried to Supabase when connectivity returns.
 
-Apply `202611020003_offline_workspace_sync.sql` to create the RLS-protected
-workspace table and optimistic-concurrency RPC. Conflicts pause workspace sync
-and offer Keep Local, Keep Remote, or a three-way field merge. The conflict
-comparison shows the local and remote workspace data; merged values preserve
-local edits where they differ from the common base and retain non-conflicting
-remote edits.
+Apply Supabase migrations `202611020001` through `202611020009` in filename
+order after configuring Supabase Auth. Migration `202611020003` creates the
+RLS-protected workspace table, and `202611020009` installs timestamp-based
+synchronization RPCs and removes legacy conflict queue states. Local edits
+remain queued offline; when online, the record with the newest `updated_at`
+timestamp automatically wins and is applied without a user prompt. The queue
+retries automatically when connectivity returns and periodically while the app
+is open. Timer state uses the same server-side timestamp comparison and a
+single per-user database row, so devices converge on one active timer state.
 
 ## FocusFlow relational database schema
 

@@ -81,7 +81,7 @@ left join public.statistics as stat
   and stat.deleted_at is null
 order by days.stat_date;
 
--- Queue items awaiting retry or conflict resolution.
+-- Queue items awaiting automatic retry.
 select
   queue.id,
   queue.idempotency_key,
@@ -89,7 +89,6 @@ select
   queue.entity_id,
   queue.operation,
   queue.payload,
-  queue.base_updated_at,
   queue.status,
   queue.attempts,
   queue.last_error,
@@ -97,6 +96,6 @@ select
 from public.sync_queue as queue
 where queue.user_id = (select auth.uid())
   and queue.deleted_at is null
-  and queue.status in ('pending', 'conflict', 'failed')
+  and queue.status in ('pending', 'failed')
 order by queue.created_at
 limit 100;

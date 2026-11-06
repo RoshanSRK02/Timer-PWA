@@ -71,7 +71,6 @@ export function useAuth() {
       provider,
       options: {
         redirectTo: getAppUrl(safeReturnPath),
-        ...(provider === "azure" ? { scopes: "email" } : {}),
       },
     });
 

@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type PropsWithChildren,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type PropsWithChildren } from "react";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useTaskStore } from "@/stores/use-task-store";
 import {
@@ -16,18 +10,8 @@ import {
   queueWorkspaceChange,
   readLocalWorkspace,
   readRemoteWorkspace,
-  resolveWorkspaceConflict,
   syncWorkspaceQueue,
-  type WorkspaceConflict,
 } from "@/services/workspace-sync";
-import { Button } from "@/components/ui/button";
-
-function workspaceContentEqual(
-  first: OfflineWorkspace | null | undefined,
-  second: OfflineWorkspace | null | undefined,
-): boolean {
-  return JSON.stringify(first?.sheets ?? []) === JSON.stringify(second?.sheets ?? []);
-}
 
 function applyWorkspace(workspace: OfflineWorkspace): void {
   const current = useTaskStore.getState();
@@ -49,18 +33,10 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [conflict, setConflict] = useState<WorkspaceConflict | null>(null);
-  const [isResolvingConflict, setIsResolvingConflict] = useState(false);
   const applyingRemote = useRef(false);
   const initializedUser = useRef<string | null>(null);
   const syncInProgress = useRef(false);
   const writeChain = useRef(Promise.resolve());
-
-  const updatePendingCount = useCallback(async (id: string) => {
-    const queued = await offlineDatabase.syncQueue.get(id);
-    setPendingCount(queued ? 1 : 0);
-  }, []);
 
   const requestBackgroundSync = useCallback(async () => {
     if (!("serviceWorker" in navigator)) return;
@@ -100,30 +76,19 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
     syncInProgress.current = true;
     setSyncError(null);
     try {
-      const result = await syncWorkspaceQueue(userId);
-      if (result.status === "conflict") {
-        setConflict(result.conflict);
-        return;
+      const workspace = await syncWorkspaceQueue(userId);
+      const current = useTaskStore.getState().sheets;
+      if (JSON.stringify(current) !== JSON.stringify(workspace.sheets)) {
+        applyRemote(workspace);
       }
-
-      const current = {
-        userId,
-        sheets: useTaskStore.getState().sheets,
-        updatedAt: result.workspace.updatedAt,
-      };
-      if (!workspaceContentEqual(current, result.workspace)) {
-        applyRemote(result.workspace);
-      }
-      await updatePendingCount(userId);
     } catch (error) {
       setSyncError(
         error instanceof Error ? error.message : "Workspace synchronization failed.",
       );
-      await updatePendingCount(userId);
     } finally {
       syncInProgress.current = false;
     }
-  }, [applyRemote, updatePendingCount, userId]);
+  }, [applyRemote, userId]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -138,6 +103,17 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
       window.removeEventListener("offline", handleOffline);
     };
   }, [runSync]);
+
+  useEffect(() => {
+    if (!userId || !isOnline || initializedUser.current !== userId) return;
+    const intervalId = window.setInterval(() => void runSync(), 10_000);
+    const handleFocus = () => void runSync();
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [isOnline, runSync, userId]);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -177,6 +153,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
       }
       if (!active) return;
 
+      const queued = await offlineDatabase.syncQueue.get(currentUserId);
       if (!local && remote) {
         await pullRemoteWorkspace(remote);
         local = remote;
@@ -190,8 +167,10 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
         };
         await queueWorkspaceChange(local);
       } else if (remote) {
-        const queued = await offlineDatabase.syncQueue.get(currentUserId);
-        if (!queued && Date.parse(remote.updatedAt) > Date.parse(local.updatedAt)) {
+        if (
+          (!queued || Date.parse(remote.updatedAt) > Date.parse(queued.local.updatedAt)) &&
+          Date.parse(remote.updatedAt) > Date.parse(local.updatedAt)
+        ) {
           await pullRemoteWorkspace(remote);
           local = remote;
         }
@@ -214,7 +193,6 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
             : "Using your local workspace. Sync will retry when connected.",
         );
       }
-      await updatePendingCount(currentUserId);
       if (await offlineDatabase.syncQueue.get(currentUserId)) {
         await requestBackgroundSync();
       }
@@ -238,7 +216,6 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
     authLoading,
     requestBackgroundSync,
     runSync,
-    updatePendingCount,
     userId,
   ]);
 
@@ -255,7 +232,6 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
       };
       writeChain.current = writeChain.current
         .then(() => queueWorkspaceChange(workspace))
-        .then(() => updatePendingCount(userId))
         .then(() => requestBackgroundSync())
         .then(() => {
           if (navigator.onLine) void runSync();
@@ -269,28 +245,7 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
         });
     });
     return unsubscribe;
-  }, [isLoading, requestBackgroundSync, runSync, updatePendingCount, userId]);
-
-  const resolveConflict = useCallback(
-    async (resolution: "local" | "remote" | "merge") => {
-      if (!conflict || isResolvingConflict) return;
-      setIsResolvingConflict(true);
-      try {
-        const workspace = await resolveWorkspaceConflict(conflict, resolution);
-        applyRemote(workspace);
-        setConflict(null);
-        await updatePendingCount(workspace.userId);
-        if (resolution !== "remote") void runSync();
-      } catch (error) {
-        setSyncError(
-          error instanceof Error ? error.message : "Unable to resolve workspace conflict.",
-        );
-      } finally {
-        setIsResolvingConflict(false);
-      }
-    },
-    [applyRemote, conflict, isResolvingConflict, runSync, updatePendingCount],
-  );
+  }, [isLoading, requestBackgroundSync, runSync, userId]);
 
   if (authLoading || isLoading) {
     return (
@@ -303,85 +258,12 @@ export function OfflineSyncProvider({ children }: PropsWithChildren) {
   return (
     <>
       {children}
-      {userId && (
-        <div
-          className="fixed bottom-20 right-4 z-30 rounded-full border bg-card/95 px-3 py-1.5 text-xs shadow-lg backdrop-blur lg:bottom-4"
-          role="status"
-          aria-live="polite"
-        >
-          <span
-            className={`mr-2 inline-block size-2 rounded-full ${
-              isOnline ? "bg-emerald-500" : "bg-amber-500"
-            }`}
-          />
-          {isOnline
-            ? pendingCount
-              ? `Sync pending (${pendingCount})`
-              : "Synced"
-            : `Offline${pendingCount ? ` · ${pendingCount} pending` : ""}`}
-        </div>
-      )}
       {syncError && (
         <div
-          className="fixed bottom-32 right-4 z-30 max-w-sm rounded-xl border border-amber-500/30 bg-card p-3 text-xs text-muted-foreground shadow-lg lg:bottom-14"
+          className="fixed bottom-20 right-4 z-30 max-w-sm rounded-xl border border-amber-500/30 bg-card p-3 text-xs text-muted-foreground shadow-lg lg:bottom-4"
           role="alert"
         >
-          <p>{syncError}</p>
-          {isOnline && (
-            <button
-              type="button"
-              onClick={() => void runSync()}
-              className="mt-2 font-semibold text-primary hover:underline"
-            >
-              Retry synchronization
-            </button>
-          )}
-        </div>
-      )}
-      {conflict && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="sync-conflict-title"
-            className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border bg-card p-5 shadow-2xl sm:p-7"
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
-              Sync conflict detected
-            </p>
-            <h2 id="sync-conflict-title" className="mt-1 text-xl font-semibold">
-              Choose which workspace version to keep
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This workspace changed locally and remotely since the last sync.
-              Compare the versions before resolving the conflict.
-            </p>
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
-              <div>
-                <h3 className="mb-2 text-sm font-semibold">Local version</h3>
-                <pre className="max-h-64 overflow-auto rounded-xl border bg-background p-3 text-[11px] leading-relaxed">
-                  {JSON.stringify(conflict.local.sheets, null, 2)}
-                </pre>
-              </div>
-              <div>
-                <h3 className="mb-2 text-sm font-semibold">Remote version</h3>
-                <pre className="max-h-64 overflow-auto rounded-xl border bg-background p-3 text-[11px] leading-relaxed">
-                  {JSON.stringify(conflict.remote.sheets, null, 2)}
-                </pre>
-              </div>
-            </div>
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
-              <Button type="button" variant="outline" disabled={isResolvingConflict} onClick={() => void resolveConflict("remote")}>
-                Keep remote
-              </Button>
-              <Button type="button" variant="outline" disabled={isResolvingConflict} onClick={() => void resolveConflict("merge")}>
-                Merge changes
-              </Button>
-              <Button type="button" disabled={isResolvingConflict} onClick={() => void resolveConflict("local")}>
-                Keep local
-              </Button>
-            </div>
-          </section>
+          <p>Synchronization will retry automatically: {syncError}</p>
         </div>
       )}
     </>

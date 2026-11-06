@@ -9,8 +9,11 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const applyTheme = () => {
       const isDark =
-        theme === "dark" || (theme === "system" && mediaQuery.matches);
+        theme === "dark" ||
+        theme === "oled" ||
+        (theme === "system" && mediaQuery.matches);
       root.classList.toggle("dark", isDark);
+      root.classList.toggle("oled", theme === "oled");
       root.style.colorScheme = isDark ? "dark" : "light";
     };
 

@@ -13,7 +13,7 @@ export function SocialAuthButtons() {
     (location.state as { from?: { pathname?: string } } | null)?.from
       ?.pathname ?? "/";
 
-  async function handleOAuth(provider: "google" | "azure") {
+  async function handleOAuth(provider: "google") {
     setErrorMessage(null);
     setProviderLoading(provider);
 
@@ -42,26 +42,6 @@ export function SocialAuthButtons() {
           <span className="text-blue-600">G</span>
         </span>
         {providerLoading === "google" ? "Connecting..." : "Continue with Google"}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className="h-11 w-full bg-card"
-        disabled={providerLoading !== null}
-        onClick={() => void handleOAuth("azure")}
-      >
-        <span
-          className="grid size-4 grid-cols-2 gap-0.5"
-          aria-hidden="true"
-        >
-          <span className="bg-[#f25022]" />
-          <span className="bg-[#7fba00]" />
-          <span className="bg-[#00a4ef]" />
-          <span className="bg-[#ffb900]" />
-        </span>
-        {providerLoading === "azure"
-          ? "Connecting..."
-          : "Continue with Microsoft"}
       </Button>
       {errorMessage && <AuthError message={errorMessage} />}
     </div>
